@@ -10,6 +10,29 @@ escriben el mismo código de sala, y os veis subiendo.
 
 ---
 
+## ⚠️ PASO OBLIGATORIO: enlazar una base de datos Deno KV
+
+Sin esto, los jugadores de América y los de Europa **no se ven entre ellos**.
+
+Deno Deploy ejecuta tu aplicación en **dos regiones a la vez** en el plan
+gratuito: `ord` (Chicago) y `ams` (Ámsterdam). Elegir una sola región es de
+pago. Son dos procesos con memorias separadas, así que una sala que viva solo en
+memoria existe por duplicado: la de Chicago y la de Ámsterdam, con el mismo
+código y sin verse. Es exactamente lo que pasaba con el amigo desde España.
+
+`main.ts` lo resuelve usando Deno KV como puente entre regiones, pero **hay que
+crear la base de datos y enlazarla**:
+
+1. En el panel de tu app → pestaña **Databases**.
+2. Crea una base **Deno KV**.
+3. **Enlázala a la aplicación** `only-up`.
+4. Vuelve a desplegar.
+
+Para comprobar que quedó bien, abre `tu-url/salas`. Debe decir `"kv": true`.
+Si dice `false`, la base no está enlazada y seguirás con el problema.
+
+---
+
 ## Por qué hacía falta esto
 
 Tu conexión directa entre navegadores nunca iba a funcionar, y ahora sé por qué.

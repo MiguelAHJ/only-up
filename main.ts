@@ -1,57 +1,147 @@
 /**
  * Torre Vertical — servidor de salas
  *
- * Un solo archivo que hace dos cosas:
- *   1. Sirve el juego en  /          (index.html, al lado de este archivo)
- *   2. Retransmite posiciones en /ws?sala=ABCD
+ * Sirve el juego en  /  y retransmite posiciones en  /ws?sala=ABCD
  *
- * Por qué un retransmisor y no P2P: un WebSocket es una conexión SALIENTE a un
- * puerto normal. No tiene que atravesar el NAT, así que funciona detrás de una
- * VPN, de un wifi de oficina o de un router con NAT simétrico — exactamente los
- * casos en los que la conexión directa entre navegadores fracasa.
+ * ─────────────────────────────────────────────────────────────────────────
+ * POR QUÉ ESTE SERVIDOR USA UNA BASE DE DATOS
  *
- * Desplegar en Deno Deploy:
- *   1. Sube esta carpeta a un repositorio de GitHub.
- *   2. En dash.deno.com → New Project → elige el repo → entry point: main.ts
- *   3. Te da una URL del tipo https://tu-app.deno.dev
+ * Deno Deploy ejecuta la aplicación en DOS regiones a la vez en el plan
+ * gratuito: `ord` (Chicago) y `ams` (Ámsterdam). Elegir una sola región es de
+ * pago. Cada región es un proceso independiente con su propia memoria, así que
+ * si las salas viven solo en memoria, un jugador enrutado a Ámsterdam crea su
+ * propia sala "ABCD" que nadie más ve. Pasa exactamente eso: los de América
+ * entran juntos y el de España se queda solo.
  *
- * Probar en local:  deno run -A main.ts   (luego abre http://localhost:8000)
+ * La solución es que las dos regiones se cuenten lo que tienen a través de
+ * Deno KV:
+ *
+ *   · Los jugadores conectados A ESTA región se retransmiten desde memoria,
+ *     a 15 Hz. Fluido, sin coste.
+ *   · Cada 200 ms esta región publica en KV su "trozo" de cada sala, y lee los
+ *     trozos de las demás. Así los jugadores de la otra región aparecen aquí.
+ *   · La semilla de la torre se fija en KV con una escritura atómica, de modo
+ *     que gana el PRIMERO que entra en todo el mundo, no el primero de cada
+ *     región. Sin esto, cada región generaría una torre distinta.
+ *
+ * Si no hay base de datos enlazada, el servidor sigue funcionando: simplemente
+ * vuelve al comportamiento de antes (cada región por su cuenta) y lo avisa en
+ * los logs.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * DESPLIEGUE
+ *   1. En el panel de Deno Deploy → pestaña "Databases" → crea una base
+ *      Deno KV y enlázala a esta aplicación.
+ *   2. Vuelve a desplegar.
+ * ─────────────────────────────────────────────────────────────────────────
  */
 
-const HZ = 15;                       // veces por segundo que se reparte el estado
+const HZ = 15;                    // reparto a los clientes de esta región
+const PERIODO_KV = 200;           // cada cuánto se sincroniza con la otra región
+const TTL_TROZO = 4000;           // un trozo caduca solo si su región calla
 const MAX_POR_SALA = 16;
 const MAX_SALAS = 200;
+const TTL_SEMILLA = 12 * 60 * 60 * 1000;
 
-type Jugador = {
-  id: string;
-  name: string;
-  color: string;
+const MI_ID = crypto.randomUUID().slice(0, 8);
+
+let kv: Deno.Kv | null = null;
+try {
+  kv = await Deno.openKv();
+  console.log(`[${MI_ID}] KV enlazada: las regiones compartirán salas`);
+} catch (e) {
+  console.warn(`[${MI_ID}] Sin KV (${e instanceof Error ? e.message : e}). ` +
+    `Cada región irá por su cuenta: enlaza una base Deno KV en el panel.`);
+}
+
+type JugadorPub = {
+  id: string; name: string; color: string;
   x: number; y: number; z: number; ry: number; best: number;
-  ws: WebSocket;
 };
+type Jugador = JugadorPub & { ws: WebSocket };
 
 type Sala = {
   codigo: string;
   seed: string;
   altura: number;
-  jugadores: Map<string, Jugador>;
+  locales: Map<string, Jugador>;
+  remotos: JugadorPub[];          // de las otras regiones, vía KV
   timer: number | null;
 };
 
 const salas = new Map<string, Sala>();
 
-const num = (v: unknown, def = 0) =>
-  typeof v === "number" && Number.isFinite(v) ? v : def;
-const texto = (v: unknown, def: string, max: number) =>
-  typeof v === "string" && v.length ? v.slice(0, max) : def;
+const num = (v: unknown, d = 0) =>
+  typeof v === "number" && Number.isFinite(v) ? v : d;
+const texto = (v: unknown, d: string, max: number) =>
+  typeof v === "string" && v.length ? v.slice(0, max) : d;
 
-function repartir(sala: Sala) {
-  const p = [...sala.jugadores.values()].map((j) => ({
+/* ───────────────────────── semilla global ───────────────────────── */
+/* Escritura atómica: solo triunfa si la clave no existía. Así la torre la
+   fija el primer jugador del mundo, no el primero de cada región.          */
+async function acordarSemilla(
+  codigo: string, propuesta: string, altura: number,
+): Promise<{ seed: string; altura: number }> {
+  if (!kv) return { seed: propuesta, altura };
+  const clave = ["semilla", codigo];
+  try {
+    const actual = await kv.get<{ seed: string; altura: number }>(clave);
+    if (actual.value) return actual.value;
+    const res = await kv.atomic()
+      .check({ key: clave, versionstamp: null })
+      .set(clave, { seed: propuesta, altura }, { expireIn: TTL_SEMILLA })
+      .commit();
+    if (res.ok) return { seed: propuesta, altura };
+    const otra = await kv.get<{ seed: string; altura: number }>(clave);
+    return otra.value ?? { seed: propuesta, altura };
+  } catch {
+    return { seed: propuesta, altura };
+  }
+}
+
+/* ───────────────────────── puente entre regiones ───────────────────────── */
+async function sincronizar(sala: Sala) {
+  if (!kv) return;
+  const mios: JugadorPub[] = [...sala.locales.values()].map((j) => ({
     id: j.id, name: j.name, color: j.color,
     x: j.x, y: j.y, z: j.z, ry: j.ry, best: j.best,
   }));
+  try {
+    // publico lo mío
+    await kv.set(["sala", sala.codigo, MI_ID], { ts: Date.now(), jugadores: mios },
+      { expireIn: TTL_TROZO });
+
+    // leo lo de las demás regiones
+    const ajenos: JugadorPub[] = [];
+    const corte = Date.now() - TTL_TROZO;
+    for await (
+      const e of kv.list<{ ts: number; jugadores: JugadorPub[] }>(
+        { prefix: ["sala", sala.codigo] },
+      )
+    ) {
+      const id = e.key[2];
+      if (id === MI_ID) continue;
+      const v = e.value;
+      if (!v || typeof v.ts !== "number" || v.ts < corte) continue;
+      if (Array.isArray(v.jugadores)) ajenos.push(...v.jugadores);
+    }
+    sala.remotos = ajenos;
+  } catch (e) {
+    console.warn(`[${MI_ID}] fallo sincronizando ${sala.codigo}:`, e);
+  }
+}
+
+/* ───────────────────────── reparto a los clientes ───────────────────────── */
+function repartir(sala: Sala) {
+  const p: JugadorPub[] = [
+    ...[...sala.locales.values()].map((j) => ({
+      id: j.id, name: j.name, color: j.color,
+      x: j.x, y: j.y, z: j.z, ry: j.ry, best: j.best,
+    })),
+    ...sala.remotos,
+  ];
   const msg = JSON.stringify({ t: "state", p });
-  for (const j of sala.jugadores.values()) {
+  for (const j of sala.locales.values()) {
     if (j.ws.readyState === WebSocket.OPEN) {
       try { j.ws.send(msg); } catch { /* se cerrará solo */ }
     }
@@ -60,55 +150,63 @@ function repartir(sala: Sala) {
 
 function arrancar(sala: Sala) {
   if (sala.timer !== null) return;
-  sala.timer = setInterval(() => repartir(sala), 1000 / HZ);
+  let desdeKv = 0;
+  sala.timer = setInterval(() => {
+    repartir(sala);
+    desdeKv += 1000 / HZ;
+    if (desdeKv >= PERIODO_KV) { desdeKv = 0; sincronizar(sala); }
+  }, 1000 / HZ);
 }
 
 function parar(sala: Sala) {
   if (sala.timer !== null) { clearInterval(sala.timer); sala.timer = null; }
 }
 
-function salir(sala: Sala, id: string) {
-  sala.jugadores.delete(id);
-  if (sala.jugadores.size === 0) {
+async function salir(sala: Sala, id: string) {
+  sala.locales.delete(id);
+  if (sala.locales.size === 0) {
     parar(sala);
     salas.delete(sala.codigo);
-    console.log(`sala ${sala.codigo} vacía, cerrada`);
+    // borro mi trozo para que la otra región no siga viendo fantasmas
+    if (kv) { try { await kv.delete(["sala", sala.codigo, MI_ID]); } catch { /* da igual */ } }
+    console.log(`[${MI_ID}] sala ${sala.codigo} vacía aquí, cerrada`);
   }
 }
 
+/* ───────────────────────── websocket ───────────────────────── */
 function manejarWS(req: Request, codigo: string): Response {
   const { socket, response } = Deno.upgradeWebSocket(req);
-  const id = crypto.randomUUID().slice(0, 8);
+  const id = MI_ID + "-" + crypto.randomUUID().slice(0, 6);
   let sala: Sala | null = null;
 
-  socket.onopen = () => { /* esperamos el hello para conocer la semilla */ };
-
-  socket.onmessage = (ev) => {
+  socket.onmessage = async (ev) => {
     let d: Record<string, unknown>;
     try { d = JSON.parse(String(ev.data)); } catch { return; }
     if (!d || typeof d !== "object") return;
 
     if (d.t === "hello") {
-      if (salas.size >= MAX_SALAS && !salas.has(codigo)) {
-        socket.close(1013, "demasiadas salas");
-        return;
+      if (!salas.has(codigo) && salas.size >= MAX_SALAS) {
+        socket.close(1013, "demasiadas salas"); return;
       }
-      // El PRIMERO que entra fija la torre; los demás la reciben.
+
+      const acuerdo = await acordarSemilla(
+        codigo, texto(d.seed, "20260918", 32), num(d.altura, 800),
+      );
+
       sala = salas.get(codigo) ?? {
-        codigo,
-        seed: texto(d.seed, "20260918", 32),
-        altura: num(d.altura, 800),
-        jugadores: new Map(),
-        timer: null,
+        codigo, seed: acuerdo.seed, altura: acuerdo.altura,
+        locales: new Map(), remotos: [], timer: null,
       };
+      // si otra región ya había fijado la torre, mando la suya
+      sala.seed = acuerdo.seed;
+      sala.altura = acuerdo.altura;
       salas.set(codigo, sala);
 
-      if (sala.jugadores.size >= MAX_POR_SALA) {
-        socket.close(1013, "sala llena");
-        return;
+      if (sala.locales.size >= MAX_POR_SALA) {
+        socket.close(1013, "sala llena"); return;
       }
 
-      sala.jugadores.set(id, {
+      sala.locales.set(id, {
         id,
         name: texto(d.name, "escalador", 14),
         color: texto(d.color, "#4FD1C5", 9),
@@ -117,13 +215,14 @@ function manejarWS(req: Request, codigo: string): Response {
       });
 
       socket.send(JSON.stringify({
-        t: "init", id, seed: sala.seed, altura: sala.altura,
+        t: "init", id, seed: sala.seed, altura: sala.altura, region: MI_ID,
       }));
       arrancar(sala);
-      console.log(`sala ${codigo}: entra ${id} (${sala.jugadores.size})`);
+      sincronizar(sala);
+      console.log(`[${MI_ID}] sala ${codigo}: entra ${id} (${sala.locales.size} aquí)`);
 
     } else if (d.t === "p" && sala) {
-      const j = sala.jugadores.get(id);
+      const j = sala.locales.get(id);
       if (!j) return;
       j.x = num(d.x); j.y = num(d.y); j.z = num(d.z);
       j.ry = num(d.ry); j.best = num(d.best);
@@ -137,6 +236,7 @@ function manejarWS(req: Request, codigo: string): Response {
   return response;
 }
 
+/* ───────────────────────── http ───────────────────────── */
 let htmlCache: string | null = null;
 async function html(): Promise<string> {
   if (htmlCache) return htmlCache;
@@ -162,12 +262,19 @@ Deno.serve(async (req: Request) => {
     return manejarWS(req, codigo);
   }
 
+  // Diagnóstico: qué ve ESTA región. Ábrelo desde dos sitios distintos y
+  // compara — si "kv" es true, los totales deben coincidir.
   if (url.pathname === "/salas") {
-    // pequeño panel: qué salas hay abiertas ahora mismo
-    const datos = [...salas.values()].map((s) => ({
-      sala: s.codigo, jugadores: s.jugadores.size, semilla: s.seed, altura: s.altura,
-    }));
-    return Response.json(datos);
+    return Response.json({
+      region: MI_ID,
+      kv: !!kv,
+      salas: [...salas.values()].map((s) => ({
+        sala: s.codigo, semilla: s.seed, altura: s.altura,
+        aqui: s.locales.size,
+        otrasRegiones: s.remotos.length,
+        total: s.locales.size + s.remotos.length,
+      })),
+    });
   }
 
   return new Response(await html(), {

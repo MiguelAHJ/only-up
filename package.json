@@ -1,0 +1,16 @@
+{
+  "name": "torre-vertical",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Escalada vertical multijugador — servidor de salas y juego",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

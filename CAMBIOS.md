@@ -1,3 +1,98 @@
+# Cambios — 21 de septiembre de 2026 (octavo lote): dificultad DIFÍCIL
+
+1800 m. Todo lo de media, más apretado, más dos cosas nuevas: **steppers**
+(las cornisas, pero de 4 a 6 repisas) y **trampolines**.
+
+## Lo primero, otra vez: los saltos no se pueden alargar
+
+Pediste plataformas "lo más alejadas posible". Ya lo están. El doble salto
+real alcanza 3,93 m de los 4,4 teóricos, el generador usa margen 0,90 y
+media ya coloca al 98% de ese máximo. Y hay un matiz que conviene ver:
+**`maxGap` ya asume el doble salto ejecutado en el ápice**, así que los
+saltos máximos de media YA exigen guardar el segundo salto y darle en el
+momento justo. Eso que querías ya estaba; lo que no se notaba era el
+castigo al fallar.
+
+Por eso DIFÍCIL aprieta el blanco, no la distancia:
+
+| | MEDIA | DIFÍCIL |
+|---|---|---|
+| altura | 1500 m | **1800 m** |
+| ancho de pieza | 0,45 – 2,40 m | **0,38 – 1,60 m** |
+| dificultad (inicio → fin) | 0,70 → 1,00 | **0,88 → 1,00** |
+| pasos entre descansos | 16 | **22** |
+| giro por paso | 24–80° | **26–88°** |
+| bidones | tamaño normal | **×0,55** |
+| senderos | 0,34–0,46 m | **0,22–0,32 m** |
+| repisas por cornisa | 2–3 | **4–6 (steppers)** |
+
+## Trampolines — la única forma de alargar de verdad
+
+Un rebote mete energía que el avatar no tiene, así que aquí sí se pueden
+hacer tramos largos sin tocar `AV`. Es lo único de este lote que toca la
+física (`resolverCaja`), y con dos decisiones deliberadas:
+
+- **Impulso fijo: 4,0 m.** Caigas de donde caigas sales igual. Eso es lo que
+  permite *aprenderse* un camino en dos intentos, y lo que me deja
+  garantizar por diseño que cada rebote llega.
+- **El rebote NO devuelve los saltos, y los pone a cero.** Una vez pisas la
+  cadena, el rebote es todo lo que tienes hasta suelo firme. El control
+  aéreo sigue, así que es cálculo y pilotaje.
+
+Una cadena son 3–5 plataformas de rebote separadas 3,9–4,8 m, a veces con un
+**bidón pequeño a mitad** (aterrizar en él es aterrizaje normal: te devuelve
+los saltos, es el respiro), y termina en una plataforma firme.
+
+### El detalle que hace la mecánica
+
+En el aire **soltar W no frena**: el rozamiento solo actúa en suelo. Para no
+pasarte de largo hay que pulsar **S**. Un rebote a velocidad de carrera
+avanza 8,3 m; los tramos están a 4 m. O sea que el juego no es llegar, es
+**no pasarse**. Eso es literalmente "calcular el rebote".
+
+## Equivocaciones del camino (dos, y las dos mías)
+
+1. El primer bot mantenía W pulsado todo el vuelo y se pasaba 3 m en cada
+   rebote: **0,7% de aciertos**. No era el diseño, era que no frenaba.
+2. El segundo simulaba los bidones intermedios como si rebotaras en ellos,
+   cuando en un bidón aterrizas normal. Eso solo bajó el número.
+3. El tercero frenaba de más y llegaba corto. Lo cambié por barrer
+   **velocidades de crucero** (v* = distancia / tiempo de vuelo), que es lo
+   que acaba encontrando un jugador a base de intentos.
+
+## Verificación
+
+Torres completas de 1800 m, 6 semillas, física real del juego:
+
+| | resultado |
+|---|---|
+| saltos normales imposibles por distancia | **0** |
+| **steppers superados** | **1.251 / 1.251 = 100%** |
+| rebotes superados | 1.134 / 1.168 = **97,1%** |
+| senderos recorridos andando | 264 / 271 = **97,4%** |
+| generar 1800 m | 2 – 6 ms |
+| piezas por torre | ~2.100 |
+
+Los steppers de 4–6 repisas salen **mejor** que las cornisas de 2–3 de
+media (99,1%): la plataforma de salida y la campana de aire reservada, que
+se añadieron para media, resuelven el problema de raíz.
+
+## ⚠ Lo que queda abierto
+
+**Un 3% de rebotes que mi bot no completa.** Distancias de 4,0–4,8 m, sin
+patrón claro. Mi piloto mantiene una velocidad *constante* todo el vuelo; un
+jugador la va corrigiendo, así que probablemente pase varios de esos. Y
+fallar un rebote no te deja encerrado: te caes, como en cualquier otro salto
+del juego.
+
+Sigue abierto también **1 cornisa de cada 100 en MEDIA** (ver lote sexto).
+
+> Si tocas `TRAMPOLIN_ALTO`, `TRAMPO_PASO_*` o `TRAMPO_LADO`, vuelve a pasar
+> `verifica-dificil.js`. Con el lado a 1,75 en vez de 2,05 los rebotes caían
+> al 93,8%, y con los tramos a 5,6 m al 95,8%.
+
+---
+
 # Cambios — 21 de septiembre de 2026 (séptimo lote): el nombre del jugador
 
 El placeholder de la casilla del nombre decía **"miguel"**, y la gente lo

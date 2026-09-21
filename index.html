@@ -248,7 +248,7 @@
     <div class="rule"></div>
     <div class="kicker">SUBIR CON AMIGOS</div>
     <div class="row2">
-      <div><label for="pname">TU NOMBRE</label><input type="text" id="pname" maxlength="14" placeholder="miguel" spellcheck="false"></div>
+      <div><label for="pname">TU NOMBRE</label><input type="text" id="pname" maxlength="14" placeholder="escribe tu nombre" spellcheck="false" autocomplete="off"></div>
       <div><label for="room">CÓDIGO DE SALA</label><input type="text" id="room" maxlength="4" placeholder="ABCD" spellcheck="false" style="text-transform:uppercase;letter-spacing:.3em"></div>
     </div>
     <div id="srvWrap" hidden>
@@ -425,6 +425,29 @@ const DIFS = {
       probCornisa: 0.15, probSendero: 0.11
     }
   }
+  ,
+  dificil: {
+    nombre: "DIFÍCIL",
+    lema: "Steppers, trampolines y nada donde caerse.",
+    altura: 1800,
+    gen: {
+      radioBase: 28, radioCima: 68,
+      giroMin: 26, giroMax: 88,
+      // el hueco ya va al tope que permite la física; lo que cambia es el blanco
+      dificultadInicial: 0.88, dificultadFinal: 1.0,
+      pasosEntreDescansos: 22,
+      descansosEntreMonumentos: 5,
+      probabilidadPiezaGrande: 0.02,
+      anchoMax: 1.6, anchoMin: 0.38,
+      probCornisa: 0.15, probSendero: 0.12, probTrampolin: 0.13,
+      // steppers: la cornisa de media pero mucho más alta
+      cornisaNiveles: [4, 6],
+      // senderos aún más finos
+      senderoAncho: [0.22, 0.32],
+      // bidones diminutos, para tener que clavar el aterrizaje
+      bidonEscala: 0.55
+    }
+  }
 };
 const DIF_POR_DEFECTO = "facil";
 const difValida = (d) => (DIFS[d] ? d : DIF_POR_DEFECTO);
@@ -493,6 +516,23 @@ const SENDERO_GIRO_MIN = 26, SENDERO_GIRO_MAX = 52;   // grados de zigzag
    tensión; la altura se gana en las piezas de antes y después.          */
 const SENDERO_SUBIDA = 0;
 
+/* ── TRAMPOLÍN ────────────────────────────────────────────────────────
+   Un rebote mete energía que el avatar NO tiene por sí solo: es la única
+   forma de hacer tramos más largos sin tocar AV, que está calibrado con
+   Unity y al límite de lo humanamente saltable.
+
+   Dos decisiones de diseño, y las dos importan:
+   · El impulso es FIJO. Caigas desde donde caigas, sales a la misma
+     altura. Es lo que permite APRENDERSE un camino de trampolines en dos
+     intentos en vez de pelearse con él, y lo que me deja garantizar por
+     diseño que cada salto de la cadena se puede hacer.
+   · El rebote NO devuelve los saltos, y además los pone a cero. Una vez
+     entras en la cadena, el rebote es todo lo que tienes hasta pisar
+     suelo normal. El control aéreo sigue funcionando, así que es cálculo
+     y pilotaje, no suerte.                                              */
+const TRAMPOLIN_ALTO = 4.0;                                  // metros de rebote
+const TRAMPOLIN_V = Math.sqrt(2 * BASE_GRAVITY * AV.gravityMultiplier * TRAMPOLIN_ALTO);
+
 // Una "caja" de colisión: centro, semiejes, yaw.
 function box(x,y,z,hw,hh,hd,yaw,kind){ return {x,y,z,hw,hh,hd,yaw,kind}; }
 
@@ -501,12 +541,17 @@ function box(x,y,z,hw,hh,hd,yaw,kind){ return {x,y,z,hw,hh,hd,yaw,kind}; }
    distancia NO sabe describir este movimiento (horizontalmente casi no te
    mueves y el problema es el voladizo), así que se valida por diseño, con
    los márgenes medidos, y no por la fórmula. */
-function colocarCornisa(rnd, addBox, canto, x, y, z, rumbo, apoyos, g){
+function colocarCornisa(rnd, addBox, canto, x, y, z, rumbo, apoyos, g, GEN){
   const M = (a,b)=>a+rnd()*(b-a);
   const yaw = -rumbo + Math.PI/2;
   const fx = Math.cos(rumbo), fz = Math.sin(rumbo);   // "hacia fuera"
   const anchoR = M(CORNISA_ANCHO_MIN, CORNISA_ANCHO_MAX);
-  const niveles = 2 + (rnd()<0.42 ? 1 : 0);
+  /* En DIFÍCIL la cornisa se llama "stepper" y es mucho más alta: el mismo
+     movimiento, pero encadenado cuatro o seis veces sin tocar suelo firme. */
+  const rangoNiv = (GEN && GEN.cornisaNiveles) || null;
+  const niveles = rangoNiv
+    ? rangoNiv[0] + Math.floor(rnd()*(rangoNiv[1]-rangoNiv[0]+1))
+    : 2 + (rnd()<0.42 ? 1 : 0);
 
   /* ORIGEN FIJO en la cara del machón. TODAS las repisas nacen aquí y solo
      cambia cuánto sobresalen, así el voladizo entre dos repisas seguidas es
@@ -565,9 +610,10 @@ function colocarCornisa(rnd, addBox, canto, x, y, z, rumbo, apoyos, g){
 }
 
 /* Un sendero: camino finísimo que serpentea. Se anda, no se salta. */
-function colocarSendero(rnd, addBox, x, y, z, rumbo, radioMax, apoyos, g){
+function colocarSendero(rnd, addBox, x, y, z, rumbo, radioMax, apoyos, g, GEN){
   const M = (a,b)=>a+rnd()*(b-a);
-  const ancho  = M(SENDERO_ANCHO_MIN, SENDERO_ANCHO_MAX);
+  const rangoAn = (GEN && GEN.senderoAncho) || [SENDERO_ANCHO_MIN, SENDERO_ANCHO_MAX];
+  const ancho  = M(rangoAn[0], rangoAn[1]);
   const segs   = Math.round(M(SENDERO_SEG_MIN, SENDERO_SEG_MAX));
   const subida = SENDERO_SUBIDA;
   const amplitud = M(SENDERO_GIRO_MIN, SENDERO_GIRO_MAX)*Math.PI/180;
@@ -603,13 +649,90 @@ function colocarSendero(rnd, addBox, x, y, z, rumbo, radioMax, apoyos, g){
    (medio jugador y un poco) y de +0,15 a +1,95 de altura, que es lo que
    ocupa el cuerpo al rematar el movimiento. */
 function invadeCampana(b, zc){
-  if (b.y - b.hh > zc.y + 1.95 || b.y + b.hh < zc.y + 0.15) return false;
+  const r  = zc.r  !== undefined ? zc.r  : 1.05;
+  const h0 = zc.h0 !== undefined ? zc.h0 : 0.15;
+  const h1 = zc.h1 !== undefined ? zc.h1 : 1.95;
+  if (b.y - b.hh > zc.y + h1 || b.y + b.hh < zc.y + h0) return false;
   const c = Math.cos(b.yaw), sn = Math.sin(b.yaw);
   const dx = zc.x - b.x, dz = zc.z - b.z;
   const lx = dx*c - dz*sn, lz = dx*sn + dz*c;
   const qx = Math.max(-b.hw, Math.min(b.hw, lx));
   const qz = Math.max(-b.hd, Math.min(b.hd, lz));
-  return Math.hypot(lx-qx, lz-qz) < 1.05;
+  return Math.hypot(lx-qx, lz-qz) < r;
+}
+
+/* CADENA DE TRAMPOLINES.
+   Rebotas de plataforma en plataforma SIN saltos: el impulso es siempre el
+   mismo, así que el alcance de cada salto también, y lo único que decides
+   es hacia dónde te inclinas en el aire. A mitad de camino puede haber un
+   bidón: aterrizar en él es un aterrizaje normal, o sea que te devuelve los
+   saltos — es el respiro de la cadena. Termina en una plataforma firme.
+
+   Los pasos están calibrados con el bot (ver CAMBIOS.md): con 4,0 m de
+   rebote el vuelo dura ~1,30 s y da para ~8,3 m a velocidad de carrera, así
+   que los tramos se quedan bastante por debajo. */
+const TRAMPO_PASO_MIN = 3.9, TRAMPO_PASO_MAX = 4.8;
+const TRAMPO_SUBE_MIN = -0.5, TRAMPO_SUBE_MAX = 1.1;
+const TRAMPO_GIRO = 0.55;              // radianes de desvío entre tramos
+/* 2,05 y no menos: al pisar un trampolín te quedas sin saltos, así que una
+   cadena que no se pueda completar te deja encerrado. El blanco tiene que
+   perdonar algo. Con 1,75 el bot fallaba un 6% de los rebotes. */
+const TRAMPO_LADO = 2.05;              // ancho de cada plataforma de rebote
+
+function colocarTrampolines(rnd, addBox, addCyl, canto, x, y, z, rumbo, radioMax, apoyos, g, aires){
+  const M = (a,b)=>a+rnd()*(b-a);
+  const n = 3 + Math.floor(rnd()*3);            // 3 a 5 rebotes
+  const bidonEn = rnd() < 0.45 ? 1 + Math.floor(rnd()*Math.max(1, n-2)) : -1;
+
+  let base = rumbo;
+  if (Math.hypot(x,z) > radioMax*0.6) base = Math.atan2(-z,-x);
+
+  const pad = (px,py,pz,yaw) => {
+    addBox(px, py-0.15, pz, TRAMPO_LADO, 0.30, TRAMPO_LADO, yaw, "peligro", true, "trampolin");
+    // faldón oscuro, solo decorado, para que se lea como un aparato y no como suelo
+    addBox(px, py-0.62, pz, TRAMPO_LADO*0.55, 0.65, TRAMPO_LADO*0.55, yaw, "oscuro", false);
+  };
+
+  let cx=x, cy=y, cz=z, r=base;
+  pad(cx, cy, cz, -r + Math.PI/2);
+  apoyos.push({x:cx, y:cy, z:cz, tipo:"trampo", g});
+  aires.push({x:cx, z:cz, y:cy, r:1.1, h0:0.2, h1:TRAMPOLIN_ALTO+1.9});
+
+  let conBidon = false, esteEsBidon = false;
+  for (let i=1;i<n;i++){
+    r = base + (rnd()-0.5)*TRAMPO_GIRO;
+    const paso = M(TRAMPO_PASO_MIN, TRAMPO_PASO_MAX);
+    cx += Math.cos(r)*paso; cz += Math.sin(r)*paso;
+    cy += M(TRAMPO_SUBE_MIN, TRAMPO_SUBE_MAX);
+    const yaw = -r + Math.PI/2;
+    if (i === bidonEn){
+      // bidón pequeño: aterrizaje normal, te devuelve los saltos
+      const d = 0.95, h = 1.0;
+      addCyl(cx, cy-h/2, cz, d, h, yaw, "oxido", true, true);
+      conBidon = true; esteEsBidon = true;
+    } else {
+      pad(cx, cy, cz, yaw);
+      aires.push({x:cx, z:cz, y:cy, r:1.1, h0:0.2, h1:TRAMPOLIN_ALTO+1.9});
+    }
+    // marcado: desde un bidón NO se rebota, se aterriza y se recuperan los
+    // saltos. Quien verifique la cadena tiene que simularlo distinto.
+    apoyos.push({x:cx, y:cy, z:cz, tipo:"trampo", g, bidon:esteEsBidon});
+    esteEsBidon = false;
+  }
+
+  /* Salida firme. Igual que en las cornisas: si la torre construyera su
+     siguiente pieza sobre la cadena, el rebote se daría con la cabeza y
+     quedarías encerrado sin saltos. */
+  r = base + (rnd()-0.5)*TRAMPO_GIRO;
+  const pasoF = M(TRAMPO_PASO_MIN, TRAMPO_PASO_MAX);
+  cx += Math.cos(r)*pasoF; cz += Math.sin(r)*pasoF;
+  cy += M(0.2, 1.4);
+  const yawF = -r + Math.PI/2;
+  addBox(cx, cy-0.5, cz, 3.0, 1.0, 3.0, yawF, "pintado", true);
+  canto(3.0,0,3.0, cx, cy-0.06, cz, yawF);
+  apoyos.push({x:cx, y:cy, z:cz});          // apoyo normal: lo verifica la fórmula
+
+  return {x:cx, y:cy, z:cz, rebotes:n, conBidon};
 }
 
 function buildTower(seedStr, alturaObjetivo, difId){
@@ -666,6 +789,7 @@ function buildTower(seedStr, alturaObjetivo, difId){
   };
   let nCornisas=0, nivelesCornisa=0, peorVoladizo=0;
   let nSenderos=0, tramosSendero=0, senderoMasFino=Infinity;
+  let nTrampo=0, rebotes=0, trampoConBidon=0;
 
   while (y < alturaObjetivo && guardia++ < 20000){
     paso++;
@@ -723,21 +847,34 @@ function buildTower(seedStr, alturaObjetivo, difId){
         // misma regla que las piezas normales: una cornisa nueva tampoco
         // puede techar a la anterior (su plataforma de salida llega lejos)
         const r = sinTechar(() =>
-          colocarCornisa(rnd, addBox, canto, cx, y, cz, rumbo, apoyos, grupoEsp+1));
+          colocarCornisa(rnd, addBox, canto, cx, y, cz, rumbo, apoyos, grupoEsp+1, GEN));
         if (r){
           grupoEsp++;
           zonasCornisa.push(r.aire);
-          if (zonasCornisa.length > 4) zonasCornisa.shift();   // solo las recientes
+          if (zonasCornisa.length > 10) zonasCornisa.splice(0, zonasCornisa.length-10);
           cx=r.x; y=r.y; cz=r.z;
           nCornisas++; nivelesCornisa += r.niveles;
           peorVoladizo = Math.max(peorVoladizo, ...r.voladizos, 0);
           continue;
         }
       }
+      if (sorteo < GEN.probCornisa + GEN.probSendero + (GEN.probTrampolin||0) &&
+          sorteo >= GEN.probCornisa + GEN.probSendero){
+        const r = sinTechar(() =>
+          colocarTrampolines(rnd, addBox, addCyl, canto, cx, y, cz, rumbo,
+                             radioMax, apoyos, grupoEsp+1, zonasCornisa));
+        if (r){
+          grupoEsp++;
+          if (zonasCornisa.length > 10) zonasCornisa.splice(0, zonasCornisa.length-10);
+          cx=r.x; y=r.y; cz=r.z;
+          nTrampo++; rebotes += r.rebotes; if (r.conBidon) trampoConBidon++;
+          continue;
+        }
+      }
       if (sorteo < GEN.probCornisa + GEN.probSendero){
         // un sendero son 15 m de tablas planas: es lo que más fácil techa
         const r = sinTechar(() =>
-          colocarSendero(rnd, addBox, cx, y, cz, rumbo, radioMax, apoyos, grupoEsp+1));
+          colocarSendero(rnd, addBox, cx, y, cz, rumbo, radioMax, apoyos, grupoEsp+1, GEN));
         if (r){
           grupoEsp++;
           cx=r.x; y=r.y; cz=r.z; rumbo=r.rumbo;
@@ -766,7 +903,7 @@ function buildTower(seedStr, alturaObjetivo, difId){
       const nS = solids.length, nV = visuals.length;
       apoyos.push({x:cx, y:y, z:cz});
       placePiece(rnd, addBox, addCyl, canto, monumento, descanso, dif,
-                 cx, y, cz, -rumbo + Math.PI/2, ancho);
+                 cx, y, cz, -rumbo + Math.PI/2, ancho, GEN);
       let choca = false;
       for (let k = nS; k < solids.length && !choca; k++)
         for (const zc of zonasCornisa) if (invadeCampana(solids[k], zc)) { choca = true; break; }
@@ -818,10 +955,11 @@ function buildTower(seedStr, alturaObjetivo, difId){
                      saltosNormales,
                      cornisas:nCornisas, nivelesCornisa, peorVoladizo,
                      senderos:nSenderos, tramosSendero,
+                     trampolines:nTrampo, rebotes, trampoConBidon,
                      senderoMasFino: senderoMasFino===Infinity ? 0 : senderoMasFino } });
 }
 
-function placePiece(rnd, addBox, addCyl, canto, monumento, descanso, dif, x, y, z, yaw, ancho){
+function placePiece(rnd, addBox, addCyl, canto, monumento, descanso, dif, x, y, z, yaw, ancho, GEN){
   const M = (a,b)=>a+rnd()*(b-a);
 
   if (monumento){
@@ -899,7 +1037,8 @@ function placePiece(rnd, addBox, addCyl, canto, monumento, descanso, dif, x, y, 
     addBox(x+oz*s, y-0.45-hm/2, z+oz*c, w*0.9,hm,w*0.9, yaw, "oscuro", false);
     canto(w,0,largo, x, y-0.06, z, yaw);
   } else {                                                    // Bidón
-    const d=M(1.1,1.5), h=M(0.9,1.3);
+    const esc = (GEN && GEN.bidonEscala) || 1;
+    const d=M(1.1,1.5)*esc, h=M(0.9,1.3)*esc;
     addCyl(x, y-h/2, z, d, h, yaw, rnd()<0.4?"peligro":"oxido", true, true);
   }
 }
@@ -1181,7 +1320,23 @@ function resolverCaja(b){
   if (px<=0||py<=0||pz<=0) return;
 
   if (py<=px && py<=pz){
-    if (dyw>0){ G.py += py; if (G.vy<0) G.vy=0; G.grounded=true; }
+    if (dyw>0){
+      G.py += py;
+      if (b.kind === "trampolin"){
+        /* Rebote. Ojo a lo que NO se hace aquí: no se pone grounded, así
+           que el bloque de physicsStep que restaura los saltos al pisar
+           no se dispara. Y se ponen a cero a mano, porque si llegas
+           andando desde una plataforma pegada te los traerías puestos. */
+        if (G.vy < TRAMPOLIN_V*0.5){
+          G.vy = TRAMPOLIN_V;
+          G.jumpsLeft = 0;
+          G.coyote = 0;
+          G.apex = G.py;     // si no, la cadena entera cuenta como una caída
+        }
+      } else {
+        if (G.vy<0) G.vy=0; G.grounded=true;
+      }
+    }
     else      { G.py -= py; if (G.vy>0) G.vy=0; }
   } else if (px<=pz){
     const dir = lx>0?1:-1;
@@ -1910,17 +2065,21 @@ function regenerate(){
     spec("ALTURA", Math.round(G.tower.altura)+" m", false) +
     spec("SALTO MÁS DURO", Math.round(inf.peor*100)+"%", inf.peor>1) +
     (inf.cornisas ? spec("CORNISAS", inf.cornisas, true) : "") +
-    (inf.senderos ? spec("SENDEROS", inf.senderos, true) : "");
+    (inf.senderos ? spec("SENDEROS", inf.senderos, true) : "") +
+    (inf.trampolines ? spec("TRAMPOLINES", inf.trampolines, true) : "");
   let v = inf.imposibles===0
     ? "Verificación: <b>los " + inf.saltosNormales + " saltos son alcanzables</b>. El más exigente pide "
       + inf.peorD.toFixed(1) + " m cruzando y " + inf.peorDy.toFixed(1) + " m subiendo."
     : "<span style='color:var(--danger)'>" + inf.imposibles + " saltos imposibles.</span>";
   // Las piezas especiales no las cubre esa fórmula; se dice, no se esconde.
-  if (inf.cornisas || inf.senderos){
+  if (inf.cornisas || inf.senderos || inf.trampolines){
     v += "<br>Aparte: <b>" + inf.cornisas + "</b> cornisas (" + inf.nivelesCornisa
        + " repisas, voladizo máx " + inf.peorVoladizo.toFixed(2) + " m) y <b>"
        + inf.senderos + "</b> senderos (" + inf.tramosSendero + " tramos, el más fino "
-       + inf.senderoMasFino.toFixed(2) + " m). Estas no las mide la fórmula de "
+       + inf.senderoMasFino.toFixed(2) + " m)"
+       + (inf.trampolines ? " y <b>" + inf.trampolines + "</b> cadenas de trampolines ("
+           + inf.rebotes + " rebotes)" : "")
+       + ". Estas no las mide la fórmula de "
        + "distancia: van con márgenes calibrados con el motor del juego.";
   }
   $("verif").innerHTML = v;
@@ -1983,7 +2142,29 @@ function colorJugador(hex){
   if (W.playerBody) W.playerBody.material.color.set(c);
   if (W.playerVisor){ W.playerVisor.material.color.set(c); W.playerVisor.material.emissive.set(c); }
 }
-function leerNombre(){ return ($("pname").value.trim().slice(0,14)) || "escalador"; }
+/* Nombre del jugador.
+   Antes el placeholder decía "miguel" y mucha gente lo leía como un nombre
+   ya puesto, así que entraba sin escribir nada — y el respaldo era la
+   cadena fija "escalador", con lo que tres amigos sin nombre salían los
+   tres como "escalador" y no se distinguían ni en la lista ni en la torre.
+   Ahora se propone uno al azar del tema de la torre, ya escrito en la
+   casilla (no de placeholder) para que se vea que es tuyo y se puede
+   cambiar, y se recuerda entre partidas. */
+const NOMBRES = ["TUERCA","PERNO","VIGA","ÓXIDO","REMACHE","ANDAMIO","POLEA",
+                 "BIDÓN","CHAPA","GRÚA","CABLE","YUNQUE","TORNILLO","SOLDADOR"];
+function nombreAzar(){
+  return NOMBRES[Math.floor(Math.random()*NOMBRES.length)] + "-" +
+         (10 + Math.floor(Math.random()*90));
+}
+/* localStorage puede fallar (modo privado, cookies bloqueadas): que no se
+   lleve por delante el arranque del juego. */
+function nombreGuardado(){ try { return localStorage.getItem("tv:nombre") || ""; } catch(e){ return ""; } }
+function guardarNombre(n){ try { localStorage.setItem("tv:nombre", n); } catch(e){} }
+
+function leerNombre(){
+  const n = $("pname").value.trim().slice(0,14);
+  return n || nombreAzar();      // ni aun vacío dos jugadores coinciden
+}
 function leerSala(){ return $("room").value.trim().toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,4); }
 function codigoAzar(){
   const L="ABCDEFGHJKLMNPQRSTUVWXYZ"; let s="";
@@ -2052,6 +2233,8 @@ $("btnJoin").addEventListener("click",()=>{
   const c=leerSala();
   if (c.length!==4){ log("Escribe el código de 4 letras de la sala.","err"); return; }
   G.name=leerNombre();
+  $("pname").value = G.name;        // si estaba vacío, que veas con qué entras
+  guardarNombre(G.name);
   colorJugador(PALETA[hashStr(G.name) % PALETA.length]);
   Net.entrar(c,{name:G.name,color:G.color});
 });
@@ -2076,6 +2259,10 @@ regenerate();
 // sala por enlace: .../torre.html#sala=ABCD entra de un clic
 const mSala = location.hash.match(/sala=([A-Za-z0-9]{1,4})/);
 $("room").value = mSala ? mSala[1].toUpperCase() : codigoAzar();
+// Nombre propuesto ya escrito, igual que el código de sala. Al hacer clic se
+// selecciona entero para que sobrescribirlo sea un solo gesto.
+$("pname").value = nombreGuardado() || nombreAzar();
+$("pname").addEventListener("focus", e => e.target.select());
 if (!urlServidor()) $("srvWrap").hidden = false;
 requestAnimationFrame(loop);
 
@@ -2084,7 +2271,8 @@ requestAnimationFrame(loop);
 if (/\bdebug\b/.test(location.hash)){
   window.__T = { G, CAPS, AV, play, respawn, Net, Perf,
                  regenerate, buildTower, indexarTorre, doJump, JumpMath, MURO_ALTO,
-                 colocarSendero, colocarCornisa, DIFS,
+                 colocarSendero, colocarCornisa, colocarTrampolines, DIFS,
+                 TRAMPOLIN_ALTO, TRAMPOLIN_V,
                  caps:()=>JumpMath.compute(),
                  informe:()=>G.tower.informe,
                  remotosCount:()=>remotos.size,

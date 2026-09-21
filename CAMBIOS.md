@@ -1,3 +1,46 @@
+# Cambios — 21 de septiembre de 2026 (séptimo lote): el nombre del jugador
+
+El placeholder de la casilla del nombre decía **"miguel"**, y la gente lo
+leía como un nombre ya puesto: entraban sin escribir nada.
+
+Y el problema de fondo era peor que el placeholder. El respaldo era una
+cadena fija:
+
+```js
+return ($("pname").value.trim().slice(0,14)) || "escalador";
+```
+
+Tres amigos entrando en blanco salían **los tres como "escalador"**, sin
+poder distinguirse ni en la lista de la izquierda ni en las etiquetas de la
+torre.
+
+Ahora:
+
+- El placeholder pasa a **"escribe tu nombre"**, que no se puede confundir
+  con un valor.
+- Al cargar, la casilla viene con un nombre **propuesto y ya escrito**
+  (valor, no placeholder), del tema de la torre: `TUERCA-38`, `GRÚA-71`,
+  `SOLDADOR-12`… Igual que ya se hacía con el código de sala.
+- Al hacer clic en la casilla **se selecciona entero**, así que cambiarlo es
+  un solo gesto.
+- Se **recuerda entre partidas** en `localStorage` (envuelto en try/catch:
+  en modo privado falla y no debe llevarse por delante el arranque).
+- Si aun así entras con la casilla vacía, se genera uno al azar en ese
+  momento y **se escribe en la casilla** para que veas con qué has entrado.
+  Ya no hay forma de que dos jugadores compartan nombre por defecto.
+
+Como el color del avatar sale de `hashStr(nombre)`, nombres distintos dan
+también colores distintos.
+
+Comprobado con navegadores reales: 6 pestañas nuevas → 6 nombres distintos;
+entrar en blanco da nombre propio y se guarda; al recargar lo recuerda; y el
+clic selecciona todo.
+
+> La lista de palabras está en la constante `NOMBRES`, justo encima de
+> `leerNombre()`. Cambiarla es una línea.
+
+---
+
 # Cambios — 21 de septiembre de 2026 (sexto lote): dificultades
 
 La torre de siempre pasa a llamarse **FÁCIL** y se añade **MEDIA**: 1500 m,

@@ -1,0 +1,12 @@
+# Capturas que la app de Claude deja al enviarlas por el chat.
+# No son parte del proyecto.
+Claude outputs/
+
+# Dependencias: se instalan con `npm install`, no se versionan.
+node_modules/
+
+# Restos típicos de Windows y de editores
+Thumbs.db
+desktop.ini
+.vscode/
+*.log

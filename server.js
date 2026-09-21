@@ -21,9 +21,16 @@ const { WebSocketServer } = require("ws");
 
 const PUERTO = process.env.PORT || 3000;
 const HZ = 15;                   // veces por segundo que se reparte el estado
+const REPOSO_MS = 1000;          // sala quieta: 1 reparto por segundo, no 15
 const MAX_POR_SALA = 16;
 const MAX_SALAS = 200;
-const INACTIVIDAD = 60_000;      // se echa a quien lleva un minuto mudo
+/* Se echa a quien lleva un rato mudo. Eran 60 s y era muy poco: el cliente
+   deja de mandar posición en cuanto entra en pausa (Alt+Tab suelta el ratón)
+   o la pestaña pasa a segundo plano, así que irte un minuto al baño bastaba
+   para que os sacara a los dos y, al quedarse la sala vacía, se cerrara. Tres
+   minutos cubre las ausencias cortas; para las largas está la reconexión
+   automática del cliente. Subirlo más solo dejaría fantasmas flotando. */
+const INACTIVIDAD = 180_000;
 
 const salas = new Map();
 
@@ -46,7 +53,7 @@ const server = http.createServer((req, res) => {
   if (ruta === "/salas") {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify([...salas.values()].map((s) => ({
-      sala: s.codigo, semilla: s.seed, altura: s.altura, jugadores: s.jugadores.size,
+      sala: s.codigo, semilla: s.seed, altura: s.altura, dif: s.dif, jugadores: s.jugadores.size,
     }))));
     return;
   }
@@ -64,20 +71,42 @@ const server = http.createServer((req, res) => {
 
 /* ─────────────────────────── salas ─────────────────────────── */
 function repartir(sala) {
+  if (!sala || !sala.jugadores) return;   // cinturón: un reparto no tumba el proceso
   const p = [...sala.jugadores.values()].map((j) => ({
     id: j.id, name: j.name, color: j.color,
     x: j.x, y: j.y, z: j.z, ry: j.ry, best: j.best,
   }));
   const msg = JSON.stringify({ t: "state", p });
+
+  /* Si nadie se ha movido, este mensaje es byte a byte el mismo que el
+     anterior (el cliente redondea a 2 decimales, así que un jugador quieto da
+     siempre lo mismo). Mandarlo 15 veces por segundo a una sala de gente AFK
+     es tráfico que no informa de nada.
+     Medido antes de esto: una sala de 4 con las pestañas olvidadas gastaba
+     ~59 GB al mes, y una de 16 unos 910 GB —con 1 TB incluido en Ashburn eso
+     es el cupo entero—. Quieta, la sala baja a 1 reparto por segundo (hace
+     falta alguno para que nadie se dé por desaparecido); en cuanto alguien se
+     mueve, el mensaje cambia y vuelve a los 15 Hz en el siguiente tick, así
+     que jugando no se nota absolutamente nada. */
+  const ahora = Date.now();
+  if (msg === sala.ultimoMsg && ahora - sala.ultimoReparto < REPOSO_MS) return;
+  sala.ultimoMsg = msg;
+  sala.ultimoReparto = ahora;
+
   for (const j of sala.jugadores.values()) {
     if (j.ws.readyState === 1) { try { j.ws.send(msg); } catch { /* se cerrará solo */ } }
   }
 }
 
+/* Idempotente a propósito: la llaman tanto el cierre de cada conexión como el
+   barrido de inactividad, y antes la misma sala se "cerraba" tres veces. */
 function cerrarSala(sala) {
-  clearInterval(sala.timer);
-  salas.delete(sala.codigo);
-  console.log(`sala ${sala.codigo} cerrada`);
+  if (!sala) return;
+  if (sala.timer) { clearInterval(sala.timer); sala.timer = null; }
+  if (salas.get(sala.codigo) === sala) {
+    salas.delete(sala.codigo);
+    console.log(`sala ${sala.codigo} cerrada`);
+  }
 }
 
 const wss = new WebSocketServer({ server, path: "/ws" });
@@ -98,6 +127,13 @@ wss.on("connection", (ws, req) => {
     try { d = JSON.parse(String(raw)); } catch { return; }
     if (!d || typeof d !== "object") return;
 
+    // Eco instantáneo: el navegador mide el viaje de ida y vuelta y lo
+    // enseña en el HUD. Va antes que nada para no falsear la medida.
+    if (d.t === "ping") {
+      if (ws.readyState === 1) { try { ws.send('{"t":"pong"}'); } catch { /* da igual */ } }
+      return;
+    }
+
     if (d.t === "hello") {
       if (sala) return;                            // ya saludó
       if (!salas.has(codigo) && salas.size >= MAX_SALAS) {
@@ -109,8 +145,12 @@ wss.on("connection", (ws, req) => {
         codigo,
         seed: texto(d.seed, "20260918", 32),
         altura: num(d.altura, 800),
+        // La dificultad la fija el primero que entra, igual que la semilla:
+        // si cada uno subiera la suya, no estaríais en la misma torre.
+        dif: texto(d.dif, "facil", 12),
         jugadores: new Map(),
         timer: null,
+        ultimoMsg: "", ultimoReparto: 0,   // para no repartir lo mismo 15 veces
       };
       salas.set(codigo, sala);
 
@@ -127,10 +167,19 @@ wss.on("connection", (ws, req) => {
         ws,
       });
 
-      ws.send(JSON.stringify({ t: "init", id, seed: sala.seed, altura: sala.altura }));
+      ws.send(JSON.stringify({ t: "init", id, seed: sala.seed, altura: sala.altura, dif: sala.dif }));
 
-      if (!sala.timer) sala.timer = setInterval(() => repartir(sala), 1000 / HZ);
-      console.log(`sala ${codigo}: entra ${id} (${sala.jugadores.size})`);
+      /* OJO con esta línea: el temporizador tiene que cerrar sobre la SALA,
+         no sobre la variable `sala` de esta conexión. Antes era
+         `setInterval(() => repartir(sala), …)`, y como `salir()` pone
+         `sala = null` al desconectarse, en cuanto el que había creado la sala
+         se iba —quedándose los demás dentro— el temporizador empezaba a
+         llamar a repartir(null): excepción sin capturar dentro de un timer,
+         o sea el PROCESO ENTERO se caía y tiraba a todas las salas del
+         servidor. Con `const s` la referencia ya no se puede volver null. */
+      const s = sala;
+      if (!s.timer) s.timer = setInterval(() => repartir(s), 1000 / HZ);
+      console.log(`sala ${codigo}: entra ${id} (${s.jugadores.size})`);
 
     } else if (d.t === "p" && sala) {
       const j = sala.jugadores.get(id);
@@ -171,6 +220,21 @@ setInterval(() => {
     if (sala.jugadores.size === 0) cerrarSala(sala);
   }
 }, 30_000);
+
+/* Red de seguridad.
+   Esto es un relay: no guarda nada que no puedan volver a mandar los propios
+   navegadores en el siguiente paquete. Así que un fallo suelto en una sala no
+   tiene por qué tirar el proceso y con él TODAS las salas del servidor —que
+   es exactamente lo que pasaba con el temporizador que cerraba sobre una
+   variable que se volvía null.
+   Queda registrado en los logs de Coolify: si ves estas líneas, hay un bug
+   real que arreglar, no las ignores por que el juego siga en pie. */
+process.on("uncaughtException", (e) => {
+  console.error("[!] excepción no capturada, el servidor sigue en pie:", e);
+});
+process.on("unhandledRejection", (e) => {
+  console.error("[!] promesa rechazada sin manejar:", e);
+});
 
 server.listen(PUERTO, () => {
   console.log(`Torre Vertical escuchando en el puerto ${PUERTO}`);

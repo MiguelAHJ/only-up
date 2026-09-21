@@ -68,6 +68,41 @@
   #drop.flash{animation:df 1.9s ease-out}
   @keyframes df{0%{opacity:0;transform:translate(-50%,-14px)}14%{opacity:1;transform:translate(-50%,0)}100%{opacity:0;transform:translate(-50%,16px)}}
 
+  /* Código de sala siempre a la vista mientras juegas: es lo que tienes que
+     dictarle a tus amigos, y antes solo salía en el menú. */
+  #sala{right:20px;top:calc(16px + env(safe-area-inset-top,0px));
+    display:flex;flex-direction:column;align-items:flex-end;gap:2px;
+    text-shadow:0 2px 20px rgba(0,0,0,.9)}
+  #sala[hidden]{display:none!important}
+  #sala .lbl{font-family:var(--mono);font-size:9.5px;letter-spacing:.3em;color:var(--ash)}
+  #sala .cod{font-family:var(--display);font-size:clamp(22px,3.4vw,34px);line-height:.95;
+    letter-spacing:.16em;color:var(--signal)}
+  #sala .cnt{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;color:var(--ash)}
+
+  /* Bloque de invitación en la pausa: el sitio natural para copiar el enlace,
+     porque durante el juego el ratón está capturado. */
+  .invite{border:1px solid var(--edge);padding:14px 16px;display:flex;flex-direction:column;gap:11px}
+  .invite[hidden]{display:none!important}
+  .invite .cod{font-family:var(--display);font-size:40px;letter-spacing:.2em;
+    color:var(--signal);line-height:1}
+  .invite .lnk{font-family:var(--mono);font-size:11px;color:var(--ash);word-break:break-all;
+    border:1px solid var(--edge);padding:8px 10px;user-select:all}
+
+  /* Aviso de red: si te echan de la sala tienes que enterarte EN EL MOMENTO,
+     no media hora después al ver que ya no está nadie. */
+  #netwarn{left:50%;top:calc(18px + env(safe-area-inset-top,0px));transform:translateX(-50%);
+    font-family:var(--mono);font-size:11.5px;letter-spacing:.14em;padding:8px 14px;
+    border:1px solid var(--danger);background:rgba(227,69,59,.14);color:#FFB4AE;
+    white-space:nowrap;text-shadow:0 1px 8px rgba(0,0,0,.9)}
+  #netwarn[hidden]{display:none!important}
+  #netwarn.ok{border-color:var(--signal);background:rgba(79,209,197,.12);color:var(--signal)}
+  #netwarn.zzz{border-color:var(--edge);background:rgba(11,14,20,.8);color:var(--ash)}
+  #netwarn.pulse{animation:nwp 1.4s ease-in-out infinite}
+  @keyframes nwp{0%,100%{opacity:1}50%{opacity:.45}}
+  #pNet{margin-top:-4px}
+  #pNet.err{color:var(--danger)}
+  #pNet.ok{color:var(--signal)}
+
   .statusbar{left:0;right:0;bottom:0;display:flex;gap:16px;align-items:center;flex-wrap:wrap;
     padding:0 20px calc(14px + env(safe-area-inset-bottom,0px));
     font-family:var(--mono);font-size:11px;color:rgba(232,228,220,.6);letter-spacing:.09em}
@@ -127,6 +162,17 @@
   .opip u{position:absolute;right:18px;top:50%;transform:translateY(-50%);font-family:var(--mono);
           font-size:10px;text-decoration:none;white-space:nowrap;text-shadow:0 1px 8px rgba(0,0,0,.9)}
 
+  /* selector de dificultad */
+  .difs{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .dbtn{border:1px solid var(--edge);background:rgba(232,228,220,.03);padding:13px 14px;
+        text-align:left;display:flex;flex-direction:column;gap:4px;transition:.16s}
+  .dbtn:hover{border-color:var(--bone)}
+  .dbtn strong{font-family:var(--mono);font-size:13px;letter-spacing:.18em;font-weight:600}
+  .dbtn small{color:var(--ash);font-size:11px;line-height:1.4}
+  .dbtn .alt{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--ash)}
+  .dbtn.on{border-color:var(--ember);background:rgba(255,107,44,.12)}
+  .dbtn.on strong{color:var(--ember)}
+
   .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   @media (max-width:520px){.row2{grid-template-columns:1fr}}
   label{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--ash);display:block;margin-bottom:6px}
@@ -157,6 +203,12 @@
     <div id="opips"></div><div id="bestPip"></div><div id="selfPip"></div>
   </div>
   <div class="lay" id="dot"></div>
+  <div class="lay" id="sala" hidden>
+    <span class="lbl">SALA</span>
+    <span class="cod" id="hSalaCod">····</span>
+    <span class="cnt" id="hSalaCnt"></span>
+  </div>
+  <div class="lay" id="netwarn" hidden></div>
   <div class="lay" id="roster"></div>
   <div class="lay statusbar">
     <span>TORRE <b id="hCode">····</b></span><span class="sep"></span>
@@ -164,6 +216,7 @@
     <span id="hSpeed">0.0 m/s</span><span class="sep"></span>
     <span id="hMode" class="run">CORRIENDO</span><span class="sep"></span>
     <span id="hTime">00:00</span><span class="sep"></span>
+    <span id="hPerf" title="Fotogramas por segundo · ida y vuelta al servidor">60 fps</span><span class="sep"></span>
     <span>ESC · PAUSA</span>
   </div>
 </div>
@@ -175,6 +228,10 @@
     <p class="tagline">La misma torre que construirá el script en Spatial, con las <em>mismas constantes de física</em>. Sirve para juzgar el diseño y el tacto de los saltos antes de instalar Unity.</p>
 
     <div class="rule"></div>
+    <div class="kicker">DIFICULTAD</div>
+    <div class="difs" id="difs"></div>
+
+    <div class="rule"></div>
     <div class="kicker">ALCANCE DEL AVATAR</div>
     <div class="specs" id="specs"></div>
     <div class="note" id="verif"></div>
@@ -182,7 +239,7 @@
     <div class="rule"></div>
     <div class="row2">
       <div><label for="seed">SEMILLA</label><input type="text" id="seed" value="20260918" spellcheck="false"></div>
-      <div><label for="height">ALTURA (M)</label><input type="number" id="height" value="800" min="50" max="2000" step="50"></div>
+      <div><label for="height">ALTURA (M)</label><input type="number" id="height" value="800" min="50" max="3000" step="50"></div>
     </div>
 
     <button class="btn primary" id="btnPlay"><strong>SUBIR EN SOLITARIO</strong><small>Se bloquea el ratón. ESC para salir.</small></button>
@@ -220,6 +277,13 @@
       <div class="spec"><span class="k">RÉCORD</span><span class="v em" id="pBest">0</span></div>
       <div class="spec"><span class="k">TIEMPO</span><span class="v" id="pTime">00:00</span></div>
     </div>
+    <div class="invite" id="pInvite" hidden>
+      <div class="kicker">CÓDIGO DE SALA</div>
+      <div class="cod" id="pCode">····</div>
+      <div class="lnk" id="pLink"></div>
+      <button class="btn" id="btnCopiar"><strong>COPIAR ENLACE</strong><small>Se lo pasas a tus amigos y entran de un clic.</small></button>
+    </div>
+    <div class="note" id="pNet"></div>
     <button class="btn primary" id="btnResume"><strong>SEGUIR</strong><small>Vuelves donde estabas.</small></button>
     <button class="btn" id="btnReset"><strong>VOLVER AL SUELO</strong><small>Reinicia la subida.</small></button>
     <button class="btn" id="btnMenu"><strong>MENÚ</strong><small>Cambiar semilla o altura.</small></button>
@@ -317,28 +381,248 @@ const clamp = (v,a,b) => v<a?a:v>b?b:v;
 const lerp  = (a,b,t) => a + (b-a)*clamp(t,0,1);
 const smooth = (t) => t*t*(3-2*t);
 
-const GEN = {
-  radioBase: 22, radioCima: 52,
-  giroMin: 18, giroMax: 62,
-  dificultadInicial: 0.42, dificultadFinal: 0.93,
-  pasosEntreDescansos: 11,
-  descansosEntreMonumentos: 3,
-  probabilidadPiezaGrande: 0.16,
-  anchoMax: 4.2, anchoMin: 0.7
+/* ═══════════════════════════════════════════════════════════════
+   Dificultades
+   ═══════════════════════════════════════════════════════════════
+   OJO CON UNA COSA antes de "subir la dificultad" alargando saltos:
+   el doble salto REAL alcanza 3,93 m medidos frente a 4,4 m teóricos
+   (0,89), y el generador ya usa un margen de 0,90. Es decir, los saltos
+   de FÁCIL ya están rozando el límite físico del avatar. Pedir más
+   distancia no es "más difícil": es generar saltos imposibles.
+   Por eso MEDIA no alarga los saltos — los aprieta por otro lado:
+   plataformas más pequeñas (menos margen al aterrizar), menos descansos,
+   giros más cerrados, y dos mecánicas nuevas (cornisas y senderos).     */
+const DIFS = {
+  facil: {
+    nombre: "FÁCIL",
+    lema: "La subida de siempre.",
+    altura: 800,
+    gen: {
+      radioBase: 22, radioCima: 52,
+      giroMin: 18, giroMax: 62,
+      dificultadInicial: 0.42, dificultadFinal: 0.93,
+      pasosEntreDescansos: 11,
+      descansosEntreMonumentos: 3,
+      probabilidadPiezaGrande: 0.16,
+      anchoMax: 4.2, anchoMin: 0.7,
+      probCornisa: 0, probSendero: 0
+    }
+  },
+  media: {
+    nombre: "MEDIA",
+    lema: "Piezas pequeñas, cornisas y senderos.",
+    altura: 1500,
+    gen: {
+      radioBase: 26, radioCima: 62,
+      giroMin: 24, giroMax: 80,
+      // arranca ya exigente y termina en el tope que permite la física
+      dificultadInicial: 0.70, dificultadFinal: 1.0,
+      pasosEntreDescansos: 16,
+      descansosEntreMonumentos: 4,
+      probabilidadPiezaGrande: 0.05,
+      // aquí está la diferencia de verdad: el blanco es mucho más chico
+      anchoMax: 2.4, anchoMin: 0.45,
+      probCornisa: 0.15, probSendero: 0.11
+    }
+  }
 };
+const DIF_POR_DEFECTO = "facil";
+const difValida = (d) => (DIFS[d] ? d : DIF_POR_DEFECTO);
+
+/* Altura de los muros laterales de las pasarelas. Ojo: estos muros SÍ
+   colisionan, así que son lo único de la torre que puede tapar la salida
+   hacia la siguiente pieza. Si lo tocas, vuelve a pasar la medición de
+   salidas bloqueadas (ver CAMBIOS.md). */
+const MURO_ALTO = 1.0;
+const MURO_GRUESO = 0.06;
+/* Hueco LIBRE del pasillo: lo que de verdad te tiene que caber. El jugador
+   mide 0,70 m de ancho (2 × HX), así que a 0,90 te quedan 10 cm por lado y a
+   0,84, siete. Antes esto salía de `ancho`, que dejaba el hueco en 2,14 m en
+   la mayoría de las pasarelas: un pasillo de más de dos metros no es un
+   pasillo. Si lo estrechas más, vuelve a medir los saltos logrados con
+   bot.js: la pasarela también es sitio donde ATERRIZAR. */
+const PASILLO_MIN = 0.84, PASILLO_MAX = 0.90;
+
+/* ── CORNISA ──────────────────────────────────────────────────────────
+   La mecánica de "saltar hacia fuera para poder subir": un machón con
+   repisas que sobresalen cada vez MÁS, así que desde la de abajo no
+   puedes subir en vertical —la de arriba te tapa—. Hay que salir al
+   vacío con el primer salto y volver con el segundo.
+
+   VOLADIZO es cuánto sobresale una repisa respecto a la de debajo, y es
+   EL número que decide si la cornisa se puede pasar. Está calibrado con
+   el bot de física (ver CAMBIOS.md): no lo subas sin volver a medir.   */
+/* EL VOLADIZO TIENE UN TECHO DURO, y no es de "puntería": es de reglas.
+   Para subir necesitas los DOS saltos. Si saltas estando aún debajo de la
+   repisa, el primer salto lo gastas dándote en la cabeza con ella (medido:
+   la vy pasa de 6,0 a 0 en seco). Así que hay que salir del voladizo ANTES
+   de saltar — pero al pisar el vacío solo conservas los dos saltos durante
+   el coyote time. Con esto:
+
+       voladizo_máx = runSpeed × coyote = 6,4 × 0,12 = 0,77 m
+
+   Por encima de eso, cuando por fin estás fuera ya solo te queda un salto y
+   no llegas; y si saltas antes, te comes la repisa. Con 0,78 fallaba el 4,5%
+   de las cornisas y NINGUNA se salvaba probando 14.880 ejecuciones distintas.
+   0,60 deja un 22% de margen.
+   Y por debajo de 2,9 m de alto no se pasa ninguna a ningún voladizo: el
+   jugador mide 1,70 y se queda encajado sin sitio para saltar. */
+const CORNISA_VOLADIZO_MIN = 0.35, CORNISA_VOLADIZO_MAX = 0.60;
+const CORNISA_ALTO_MIN = 3.15, CORNISA_ALTO_MAX = 3.60;
+const CORNISA_SALIENTE  = 2.30;    // cuánto sobresale la repisa de abajo
+const CORNISA_ANCHO_MIN = 1.80, CORNISA_ANCHO_MAX = 2.60;   // ancho lateral
+
+/* ── SENDERO ──────────────────────────────────────────────────────────
+   Camino finísimo en zigzag: no hay que saltar, hay que andar sin
+   pasarse. Sin muros: te vas de lado y te caes.
+
+   OJO con el ancho: el resolutor de colisiones te sostiene mientras haya
+   solape, y el jugador mide 0,70 de ancho, así que un camino de 0,40 se
+   camina como si midiera 1,10 (0,40 + 2×HX). El número que se siente es
+   ese, no el que ves. Calibrado con el bot.                            */
+const SENDERO_ANCHO_MIN = 0.34, SENDERO_ANCHO_MAX = 0.46;
+const SENDERO_PASO = 1.30;                      // largo de cada tramo
+const SENDERO_SEG_MIN = 7, SENDERO_SEG_MAX = 14;
+const SENDERO_GIRO_MIN = 26, SENDERO_GIRO_MAX = 52;   // grados de zigzag
+/* El sendero va LLANO, y no es pereza: medido con traza (traza.js), un
+   sendero que subía 0,12 m por tramo era intransitable. El motor no tiene
+   subida de escalón —la resolución por penetración mínima empuja en
+   horizontal mientras el solape vertical sea mayor— así que cada junta era
+   un muro de 12 cm: el jugador se clavaba, resbalaba de lado y se caía.
+   Cualquier subida > 0 bloquea. El sendero es un tramo horizontal de
+   tensión; la altura se gana en las piezas de antes y después.          */
+const SENDERO_SUBIDA = 0;
 
 // Una "caja" de colisión: centro, semiejes, yaw.
 function box(x,y,z,hw,hh,hd,yaw,kind){ return {x,y,z,hw,hh,hd,yaw,kind}; }
 
-function buildTower(seedStr, alturaObjetivo){
-  const rnd = mulberry32(hashStr("torre:" + seedStr));
+/* Una cornisa. Devuelve dónde te deja para seguir construyendo.
+   Empuja sus propios apoyos marcados tipo:"cornisa": la verificación por
+   distancia NO sabe describir este movimiento (horizontalmente casi no te
+   mueves y el problema es el voladizo), así que se valida por diseño, con
+   los márgenes medidos, y no por la fórmula. */
+function colocarCornisa(rnd, addBox, canto, x, y, z, rumbo, apoyos, g){
+  const M = (a,b)=>a+rnd()*(b-a);
+  const yaw = -rumbo + Math.PI/2;
+  const fx = Math.cos(rumbo), fz = Math.sin(rumbo);   // "hacia fuera"
+  const anchoR = M(CORNISA_ANCHO_MIN, CORNISA_ANCHO_MAX);
+  const niveles = 2 + (rnd()<0.42 ? 1 : 0);
+
+  /* ORIGEN FIJO en la cara del machón. TODAS las repisas nacen aquí y solo
+     cambia cuánto sobresalen, así el voladizo entre dos repisas seguidas es
+     exactamente la diferencia de longitud — que es el número calibrado.
+     Antes cada repisa se colocaba respecto al BORDE de la anterior: en las
+     cornisas de tres niveles la de arriba quedaba flotando lejos del machón
+     y el voladizo real no era el que decía la constante. Se veía en la
+     verificación: fallaban justo las de tres niveles. */
+  const ox = x - fx*(CORNISA_SALIENTE/2), oz = z - fz*(CORNISA_SALIENTE/2);
+
+  let sal = CORNISA_SALIENTE;
+  addBox(x, y-0.30, z, anchoR, 0.60, sal, yaw, "hormigon", true);
+  canto(anchoR,0,sal, x, y-0.06, z, yaw);
+  apoyos.push({x, y, z, tipo:"cornisa", g});
+
+  let cy = y, altoTotal = 0;
+  const vol = [];
+  for (let i=1;i<niveles;i++){
+    const voladizo = M(CORNISA_VOLADIZO_MIN, CORNISA_VOLADIZO_MAX);
+    const alto     = M(CORNISA_ALTO_MIN, CORNISA_ALTO_MAX);
+    vol.push(+voladizo.toFixed(2));
+    const largo = sal + voladizo;          // sobresale `voladizo` más que la de abajo
+    cy += alto; altoTotal += alto;
+    const cxr = ox + fx*largo/2, czr = oz + fz*largo/2;
+    addBox(cxr, cy-0.25, czr, anchoR, 0.50, largo, yaw, i%2 ? "galv" : "pintado", true);
+    canto(anchoR,0,largo, cxr, cy-0.06, czr, yaw);
+    // te plantas cerca del borde de fuera, que es desde donde se sigue
+    apoyos.push({x: ox + fx*(largo-0.70), y: cy, z: oz + fz*(largo-0.70),
+                 tipo:"cornisa", g});
+    sal = largo;
+  }
+
+  // El machón contra el que se apoyan todas.
+  addBox(ox - fx*0.45, y + altoTotal/2 - 1.2, oz - fz*0.45,
+         anchoR*0.9, altoTotal + 3.2, 0.9, yaw, "oscuro", true);
+
+  /* SALIDA — y esto NO es decorado, es lo que hace la cornisa posible.
+     Para rematar el movimiento el jugador acaba con la cabeza 1,70 m por
+     encima de la repisa alta. Si la torre construye su siguiente pieza ahí,
+     la cornisa se vuelve IMPOSIBLE: medido con traza, el jugador se daba
+     dos veces en la cabeza (una contra la repisa y otra contra la losa de
+     arriba) y se quedaba en 2,55 m de los 3,54 que necesitaba.
+     Por eso la cornisa se lleva su propia plataforma de salida, lejos y
+     arriba, y la torre sigue DESDE AHÍ: así el aire sobre la cornisa queda
+     libre por construcción. El salto hasta ella es normal y corriente, y su
+     apoyo va sin tipo para que la verificación por distancia sí lo mida. */
+  const salidaD = 4.2, salidaSube = M(1.3, 1.9);
+  const sxp = ox + fx*(sal + salidaD), szp = oz + fz*(sal + salidaD);
+  const syp = cy + salidaSube;
+  addBox(sxp, syp-0.45, szp, 2.60, 0.90, 2.60, yaw, "pintado", true);
+  canto(2.60,0,2.60, sxp, syp-0.06, szp, yaw);
+  apoyos.push({x:sxp, y:syp, z:szp});
+
+  return {x:sxp, y:syp, z:szp, niveles, voladizos:vol,
+          aire:{x: ox + fx*(sal-0.70), z: oz + fz*(sal-0.70), y: cy}};
+}
+
+/* Un sendero: camino finísimo que serpentea. Se anda, no se salta. */
+function colocarSendero(rnd, addBox, x, y, z, rumbo, radioMax, apoyos, g){
+  const M = (a,b)=>a+rnd()*(b-a);
+  const ancho  = M(SENDERO_ANCHO_MIN, SENDERO_ANCHO_MAX);
+  const segs   = Math.round(M(SENDERO_SEG_MIN, SENDERO_SEG_MAX));
+  const subida = SENDERO_SUBIDA;
+  const amplitud = M(SENDERO_GIRO_MIN, SENDERO_GIRO_MAX)*Math.PI/180;
+  const periodo  = M(3.2, 6.0);          // tramos por onda del zigzag
+  const fase     = rnd()*Math.PI*2;
+
+  // Un sendero recorre mucho horizontal. Si estamos lejos del eje, lo
+  // orientamos de vuelta hacia el centro o se sale de la torre.
+  let base = rumbo;
+  if (Math.hypot(x,z) > radioMax*0.62) base = Math.atan2(-z,-x);
+
+  // Apoyo en la BOCA del sendero: el salto que te trae hasta aquí sí es un
+  // salto normal y tiene que entrar en la verificación por distancia.
+  apoyos.push({x, y, z, tipo:"sendero", g});
+
+  let cx=x, cz=z, cy=y, r=base;
+  for (let i=0;i<segs;i++){
+    r = base + Math.sin(fase + (i/periodo)*Math.PI*2)*amplitud;
+    const nx = cx + Math.cos(r)*SENDERO_PASO, nz = cz + Math.sin(r)*SENDERO_PASO;
+    const mx = (cx+nx)/2, mz = (cz+nz)/2;
+    // 1,12 de solape: en las curvas, dos tramos a tope dejarían un pico sin
+    // suelo justo en la junta, y ahí te caerías sin entender por qué.
+    addBox(mx, cy+subida/2-0.08, mz, ancho, 0.16, SENDERO_PASO*1.12,
+           -r + Math.PI/2, i%2 ? "galv" : "oxido", true);
+    cx=nx; cz=nz; cy+=subida;
+    if (i%2===1 || i===segs-1) apoyos.push({x:cx, y:cy, z:cz, tipo:"sendero", g});
+  }
+  return {x:cx, y:cy, z:cz, rumbo:r, segs, ancho:+ancho.toFixed(2)};
+}
+
+/* ¿Esta caja invade el aire que una cornisa necesita? La campana es un
+   cilindro sobre el sitio donde te plantas en la repisa alta: radio 1,05
+   (medio jugador y un poco) y de +0,15 a +1,95 de altura, que es lo que
+   ocupa el cuerpo al rematar el movimiento. */
+function invadeCampana(b, zc){
+  if (b.y - b.hh > zc.y + 1.95 || b.y + b.hh < zc.y + 0.15) return false;
+  const c = Math.cos(b.yaw), sn = Math.sin(b.yaw);
+  const dx = zc.x - b.x, dz = zc.z - b.z;
+  const lx = dx*c - dz*sn, lz = dx*sn + dz*c;
+  const qx = Math.max(-b.hw, Math.min(b.hw, lx));
+  const qz = Math.max(-b.hd, Math.min(b.hd, lz));
+  return Math.hypot(lx-qx, lz-qz) < 1.05;
+}
+
+function buildTower(seedStr, alturaObjetivo, difId){
+  const DIF = DIFS[difValida(difId)];
+  const GEN = DIF.gen;
+  const rnd = mulberry32(hashStr("torre:" + difValida(difId) + ":" + seedStr));
   const solids = [];   // colisionan
   const visuals = [];  // {cx,cy,cz,sx,sy,sz,yaw,mat,shape}
   const apoyos = [];
 
-  const addBox = (cx,cy,cz,sx,sy,sz,yaw,mat,collide) => {
+  const addBox = (cx,cy,cz,sx,sy,sz,yaw,mat,collide,kind) => {
     visuals.push({cx,cy,cz,sx,sy,sz,yaw,mat,shape:"box"});
-    if (collide) solids.push(box(cx,cy,cz,sx/2,sy/2,sz/2,yaw));
+    if (collide) solids.push(box(cx,cy,cz,sx/2,sy/2,sz/2,yaw,kind));
   };
   const addCyl = (cx,cy,cz,d,len,yaw,mat,collide,vertical) => {
     visuals.push({cx,cy,cz,sx:d,sy:len,sz:d,yaw,mat,shape:vertical?"cylV":"cylZ"});
@@ -363,6 +647,25 @@ function buildTower(seedStr, alturaObjetivo){
 
   let cx=0, cz=0, y=0, rumbo=rnd()*Math.PI*2;
   let paso=0, desdeDescanso=0, descansos=0, guardia=0;
+  let grupoEsp=0;
+  const zonasCornisa=[];   // campana de aire que hay que dejar libre
+
+  /* Ejecuta una colocación y la DESHACE si ha techado alguna cornisa.
+     Devuelve el resultado, o null si no hubo manera (y entonces el bucle
+     sigue con una pieza normal). */
+  const sinTechar = (fn) => {
+    const nS = solids.length, nV = visuals.length, nA = apoyos.length;
+    const r = fn();
+    for (let k = nS; k < solids.length; k++)
+      for (const zc of zonasCornisa)
+        if (invadeCampana(solids[k], zc)){
+          solids.length = nS; visuals.length = nV; apoyos.length = nA;
+          return null;
+        }
+    return r;
+  };
+  let nCornisas=0, nivelesCornisa=0, peorVoladizo=0;
+  let nSenderos=0, tramosSendero=0, senderoMasFino=Infinity;
 
   while (y < alturaObjetivo && guardia++ < 20000){
     paso++;
@@ -392,7 +695,58 @@ function buildTower(seedStr, alturaObjetivo){
       rumbo = Math.atan2(-cz,-cx) + (rnd()-0.5)*1.1;
       nx = cx + Math.cos(rumbo)*hueco; nz = cz + Math.sin(rumbo)*hueco;
     }
+
+    /* AIRE RESERVADO SOBRE LAS CORNISAS.
+       Rematar una cornisa deja al jugador con la cabeza 1,70 m por encima
+       de la repisa alta. Si la torre construye ahí —y con giros de hasta
+       80° puede volver sobre sus pasos en dos pasos—, esa cornisa queda
+       techada y es IMPOSIBLE. La plataforma de salida resuelve la pieza
+       siguiente; esto resuelve las de más adelante. Si el candidato cae en
+       la campana de aire de una cornisa reciente, se desvía y se recoloca. */
+    for (const zc of zonasCornisa){
+      const dyz = (y + dy) - zc.y;
+      if (dyz > -0.4 && dyz < 2.8 && Math.hypot(nx-zc.x, nz-zc.z) < 3.3){
+        rumbo += Math.PI*0.55;
+        nx = cx + Math.cos(rumbo)*hueco; nz = cz + Math.sin(rumbo)*hueco;
+        break;
+      }
+    }
+
+    const px0=cx, pz0=cz;
     cx=nx; cz=nz; y+=dy;
+
+    /* Mecánicas especiales de MEDIA. Nunca sobre un descanso ni un
+       monumento: esos están justamente para respirar. */
+    if (!descanso && !monumento && (GEN.probCornisa || GEN.probSendero)){
+      const sorteo = rnd();
+      if (sorteo < GEN.probCornisa){
+        // misma regla que las piezas normales: una cornisa nueva tampoco
+        // puede techar a la anterior (su plataforma de salida llega lejos)
+        const r = sinTechar(() =>
+          colocarCornisa(rnd, addBox, canto, cx, y, cz, rumbo, apoyos, grupoEsp+1));
+        if (r){
+          grupoEsp++;
+          zonasCornisa.push(r.aire);
+          if (zonasCornisa.length > 4) zonasCornisa.shift();   // solo las recientes
+          cx=r.x; y=r.y; cz=r.z;
+          nCornisas++; nivelesCornisa += r.niveles;
+          peorVoladizo = Math.max(peorVoladizo, ...r.voladizos, 0);
+          continue;
+        }
+      }
+      if (sorteo < GEN.probCornisa + GEN.probSendero){
+        // un sendero son 15 m de tablas planas: es lo que más fácil techa
+        const r = sinTechar(() =>
+          colocarSendero(rnd, addBox, cx, y, cz, rumbo, radioMax, apoyos, grupoEsp+1));
+        if (r){
+          grupoEsp++;
+          cx=r.x; y=r.y; cz=r.z; rumbo=r.rumbo;
+          nSenderos++; tramosSendero += r.segs;
+          senderoMasFino = Math.min(senderoMasFino, r.ancho);
+          continue;
+        }
+      }
+    }
 
     let ancho;
     if (monumento) ancho = 11 + rnd()*5;
@@ -402,10 +756,25 @@ function buildTower(seedStr, alturaObjetivo){
       if (rnd() < GEN.probabilidadPiezaGrande) ancho *= 1.9 + rnd()*1.2;
     }
     ancho = Math.max(0.55, ancho);
-    const yaw = -rumbo + Math.PI/2;
 
-    apoyos.push({x:cx,y:y,z:cz});
-    placePiece(rnd, addBox, addCyl, canto, monumento, descanso, dif, cx, y, cz, yaw, ancho);
+    /* Se coloca la pieza y se comprueba que no haya techado ninguna cornisa
+       reciente. No vale mirar solo dónde cae su apoyo: una pasarela mide
+       hasta 14 m y una losa grande 7, así que el centro puede estar lejos y
+       la caja justo encima. Si invade, se deshace y se prueba girando. */
+    let colocada = false;
+    for (let intento = 0; intento < 3 && !colocada; intento++){
+      const nS = solids.length, nV = visuals.length;
+      apoyos.push({x:cx, y:y, z:cz});
+      placePiece(rnd, addBox, addCyl, canto, monumento, descanso, dif,
+                 cx, y, cz, -rumbo + Math.PI/2, ancho);
+      let choca = false;
+      for (let k = nS; k < solids.length && !choca; k++)
+        for (const zc of zonasCornisa) if (invadeCampana(solids[k], zc)) { choca = true; break; }
+      if (!choca || intento === 2){ colocada = true; break; }
+      solids.length = nS; visuals.length = nV; apoyos.pop();
+      rumbo += Math.PI*0.5;
+      cx = px0 + Math.cos(rumbo)*hueco; cz = pz0 + Math.sin(rumbo)*hueco;
+    }
   }
 
   // ── Cima ──
@@ -422,10 +791,20 @@ function buildTower(seedStr, alturaObjetivo){
   start.yaw = Math.atan2(-(first.x-start.x), -(first.z-start.z));
 
   // ── Verificación (idéntica a la de Unity) ──
-  let peor=0, imposibles=0, peorD=0, peorDy=0;
+  /* Verificación. Solo cubre los saltos NORMALES: dentro de una cornisa el
+     movimiento no es "cruzar un hueco" (horizontalmente casi no te mueves y
+     lo que estorba es el voladizo) y dentro de un sendero no se salta, se
+     anda. Esas dos se validan por diseño, con márgenes medidos con el bot
+     de física, y se cuentan aparte para que el informe no mienta. */
+  let peor=0, imposibles=0, peorD=0, peorDy=0, saltosNormales=0;
   for (let i=1;i<apoyos.length;i++){
     const a=apoyos[i-1], b=apoyos[i];
+    /* Solo se salta el tramo INTERNO de una misma pieza especial. Sin el
+       id de grupo, dos cornisas seguidas parecían una sola y el salto
+       normal que las une se colaba sin verificar. */
+    if (a.tipo && a.tipo === b.tipo && a.g === b.g) continue;
     const ddy=b.y-a.y, dd=Math.hypot(b.x-a.x, b.z-a.z);
+    saltosNormales++;
     const mx=JumpMath.maxGap(CAPS, ddy, MARGEN);
     if (mx<0){ imposibles++; continue; }
     const r=dd/mx;
@@ -433,8 +812,13 @@ function buildTower(seedStr, alturaObjetivo){
     if (r>1) imposibles++;
   }
 
-  return { solids, visuals, apoyos, summit, start, altura:y,
-           informe:{peor, imposibles, peorD, peorDy, piezas:visuals.length} };
+  return indexarTorre({ solids, visuals, apoyos, summit, start, altura:y,
+           dif: difValida(difId),
+           informe:{ peor, imposibles, peorD, peorDy, piezas:visuals.length,
+                     saltosNormales,
+                     cornisas:nCornisas, nivelesCornisa, peorVoladizo,
+                     senderos:nSenderos, tramosSendero,
+                     senderoMasFino: senderoMasFino===Infinity ? 0 : senderoMasFino } });
 }
 
 function placePiece(rnd, addBox, addCyl, canto, monumento, descanso, dif, x, y, z, yaw, ancho){
@@ -484,12 +868,23 @@ function placePiece(rnd, addBox, addCyl, canto, monumento, descanso, dif, x, y, 
     addCyl(x, y-d/2, z, d, largo, yaw, rnd()<0.5?"galv":"oxido", true, false);
     canto(d,0,largo, x, y-0.06, z, yaw);
   } else if (r < 0.76){                                       // Pasarela
-    const w=clamp(ancho,0.9,2.2), largo=M(6,14);
+    /* El ancho sale del hueco que queremos dejar, no de `ancho`: la gracia
+       de un pasillo es que sea estrecho. El tablón va justo hasta la cara de
+       fuera de cada muro. */
+    /* Ojo: NO se llama a rnd() aquí. El ancho se reescala del `ancho` que ya
+       venía calculado, así que la secuencia del PRNG no se mueve y cada
+       semilla sigue dando exactamente la misma torre que antes — solo que
+       con las pasarelas estrechas. Si metes un rnd() aquí, todas las torres
+       conocidas cambian de golpe. */
+    const hueco = PASILLO_MIN + (PASILLO_MAX-PASILLO_MIN) * (clamp(ancho,0.9,2.2)-0.9)/1.3;
+    const w = hueco + MURO_GRUESO*2, largo=M(6,14);
     addBox(x, y-0.09, z, w,0.18,largo, yaw, "galv", true);
     const c=Math.cos(yaw), s=Math.sin(yaw);
+    /* Los muros del pasillo ahora COLISIONAN. Se marcan con kind "muro" para
+       poder medirlos aparte: son lo único que puede tapar una salida. */
     for (let i=-1;i<=1;i+=2){
-      const px=i*w/2;
-      addBox(x+px*c, y+0.5, z-px*s, 0.06,1,largo, yaw, "oscuro", false);
+      const px=i*(hueco + MURO_GRUESO)/2;
+      addBox(x+px*c, y+MURO_ALTO/2, z-px*s, MURO_GRUESO,MURO_ALTO,largo, yaw, "oscuro", true, "muro");
     }
     canto(w,0,largo, x, y-0.06, z, yaw);
   } else if (r < 0.85){                                       // Rampa (aquí plana, por simplicidad)
@@ -647,13 +1042,14 @@ function buildMeshes(tower){
    5 · Estado y física
    ═══════════════════════════════════════════════════════════════ */
 const G = {
-  mode:"menu", tower:null, code:"20260918", altura:800,
+  mode:"menu", tower:null, code:"20260918", altura:800, dif:DIF_POR_DEFECTO,
   name:"escalador", color:"#FF6B2C",
   px:0, py:1.4, pz:0, vx:0, vy:0, vz:0,
   yaw:0, pitch:0.08,
   grounded:false, jumpsLeft:2, coyote:0, buffer:0,
   best:0, worst:0, apex:0, elapsed:0, won:false,
   keys:Object.create(null),
+  ultimaEntrada:0,        // última vez que tocaste teclado o ratón (ver siesta)
   // cámara amortiguada — desacoplada de la posición física
   camX:0, camY:0, camZ:0, camDist:6.2
 };
@@ -742,43 +1138,75 @@ function physicsStep(h){
   }
 }
 
+/* ─── Índice espacial por altura ──────────────────────────────────────
+   Una torre de 800 m tiene cientos de cajas, pero el jugador solo puede
+   chocar con las que tiene al lado. Antes recorríamos TODAS en cada
+   subpaso: a velocidad de caída son ~100 subpasos por fotograma, o sea
+   decenas de miles de comprobaciones inútiles que hundían el framerate.
+
+   Ahora las cajas se reparten en cubos de 8 m de altura y solo se miran
+   los tres cubos alrededor del jugador. De cientos de comprobaciones a
+   unas pocas.                                                          */
+const CELDA = 8;
+
+function indexarTorre(tower){
+  const idx = new Map();
+  for (const b of tower.solids){
+    const lo = Math.floor((b.y - b.hh - 1) / CELDA);
+    const hi = Math.floor((b.y + b.hh + 1) / CELDA);
+    for (let c = lo; c <= hi; c++){
+      let a = idx.get(c);
+      if (!a){ a = []; idx.set(c, a); }
+      a.push(b);
+    }
+  }
+  tower.idx = idx;
+  return tower;
+}
+
 /* Resolución por penetración mínima en el espacio local de cada caja.
    Con subpasos de 6 cm la penetración es diminuta, así que la corrección
    es invisible: eso es lo que elimina el teletransporte al aterrizar. */
+function resolverCaja(b){
+  const dyw=G.py-b.y;
+  if (Math.abs(dyw) >= b.hh+HY) return;
+  const dxw=G.px-b.x, dzw=G.pz-b.z;
+  if (Math.abs(dxw) >= b.hw+b.hd+HX+HZ) return;
+
+  const c=Math.cos(b.yaw), s=Math.sin(b.yaw);
+  const lx=dxw*c - dzw*s;
+  const lz=dxw*s + dzw*c;
+  const ex=b.hw+HX, ey=b.hh+HY, ez=b.hd+HZ;
+  const px=ex-Math.abs(lx), py=ey-Math.abs(dyw), pz=ez-Math.abs(lz);
+  if (px<=0||py<=0||pz<=0) return;
+
+  if (py<=px && py<=pz){
+    if (dyw>0){ G.py += py; if (G.vy<0) G.vy=0; G.grounded=true; }
+    else      { G.py -= py; if (G.vy>0) G.vy=0; }
+  } else if (px<=pz){
+    const dir = lx>0?1:-1;
+    const ax=c, az=-s;                 // eje X local en mundo
+    G.px += px*dir*ax; G.pz += px*dir*az;
+    const vd = G.vx*ax + G.vz*az;
+    if (vd*dir<0){ G.vx-=vd*ax; G.vz-=vd*az; }
+  } else {
+    const dir = lz>0?1:-1;
+    const ax=s, az=c;                  // eje Z local en mundo
+    G.pz += pz*dir*az; G.px += pz*dir*ax;
+    const vd = G.vx*ax + G.vz*az;
+    if (vd*dir<0){ G.vx-=vd*ax; G.vz-=vd*az; }
+  }
+}
+
 function resolveCollisions(){
   if (!G.tower) return;
   G.grounded=false;
-  const S=G.tower.solids;
-  for (let i=0;i<S.length;i++){
-    const b=S[i];
-    const dyw=G.py-b.y;
-    if (Math.abs(dyw) >= b.hh+HY) continue;          // descarte rápido
-    const dxw=G.px-b.x, dzw=G.pz-b.z;
-    if (Math.abs(dxw) >= b.hw+b.hd+HX+HZ) continue;
-
-    const c=Math.cos(b.yaw), s=Math.sin(b.yaw);
-    const lx=dxw*c - dzw*s;
-    const lz=dxw*s + dzw*c;
-    const ex=b.hw+HX, ey=b.hh+HY, ez=b.hd+HZ;
-    const px=ex-Math.abs(lx), py=ey-Math.abs(dyw), pz=ez-Math.abs(lz);
-    if (px<=0||py<=0||pz<=0) continue;
-
-    if (py<=px && py<=pz){
-      if (dyw>0){ G.py += py; if (G.vy<0) G.vy=0; G.grounded=true; }
-      else      { G.py -= py; if (G.vy>0) G.vy=0; }
-    } else if (px<=pz){
-      const dir = lx>0?1:-1;
-      const ax=c, az=-s;                 // eje X local en mundo
-      G.px += px*dir*ax; G.pz += px*dir*az;
-      const vd = G.vx*ax + G.vz*az;
-      if (vd*dir<0){ G.vx-=vd*ax; G.vz-=vd*az; }
-    } else {
-      const dir = lz>0?1:-1;
-      const ax=s, az=c;                  // eje Z local en mundo
-      G.pz += pz*dir*az; G.px += pz*dir*ax;
-      const vd = G.vx*ax + G.vz*az;
-      if (vd*dir<0){ G.vx-=vd*ax; G.vz-=vd*az; }
-    }
+  const idx = G.tower.idx;
+  const c0 = Math.floor(G.py / CELDA);
+  for (let k = c0-1; k <= c0+1; k++){
+    const arr = idx.get(k);
+    if (!arr) continue;
+    for (let i=0;i<arr.length;i++) resolverCaja(arr[i]);
   }
 }
 
@@ -814,43 +1242,67 @@ function updateCamera(dt){
   const dir=new THREE.Vector3(-Math.sin(G.yaw)*cp, sp, -Math.cos(G.yaw)*cp);
   const target=new THREE.Vector3(G.camX, G.camY+0.55, G.camZ);
 
-  let dist=6.2;
+  /* Distancia de la cámara. Antes esto se muestreaba en 8 pasos y se
+     redondeaba al paso anterior, así que la distancia solo podía valer ocho
+     valores: al pasar junto a una viga la cámara daba un tirón de hasta 4,5
+     metros de golpe, y al salir de la viga volvía de golpe. Una viga fina
+     entre dos muestras además aparecía y desaparecía fotograma a fotograma.
+     Eso es el "salto de cámara" que te hacía fallar los saltos.
+     Ahora: muestreo fino, distancia continua, y sale despacio aunque entre
+     deprisa (entrar deprisa es obligatorio para no ver a través del metal). */
+  const PASOS=24, DMAX=6.2, DMIN=2.0;
+  let dist=DMAX;
   if (G.tower){
-    for (let s=1;s<=8;s++){
-      const d=6.2*(s/8);
-      const q=target.clone().addScaledVector(dir,-d);
-      if (hitsSolid(q)){ dist=Math.max(1.7, 6.2*((s-1)/8)); break; }
+    const q=new THREE.Vector3();
+    for (let s=1;s<=PASOS;s++){
+      const d=DMAX*(s/PASOS);
+      q.copy(target).addScaledVector(dir,-d);
+      if (hitsSolid(q)){ dist=Math.max(DMIN, d-DMAX/PASOS*0.5); break; }
     }
   }
-  G.camDist += (dist-G.camDist)*(1-Math.exp(-dt/0.10));
+  const tau = dist < G.camDist ? 0.05 : 0.28;   // entra rápido, sale suave
+  G.camDist += (dist-G.camDist)*(1-Math.exp(-dt/tau));
   W.camera.position.copy(target).addScaledVector(dir,-G.camDist);
   W.camera.lookAt(target);
   W.sky.position.copy(W.camera.position);
   W.clouds.forEach(c=>{ c.position.x=G.px; c.position.z=G.pz; c.rotation.z+=c.userData.spin; });
 }
 function hitsSolid(q){
-  const S=G.tower.solids;
-  for (let i=0;i<S.length;i++){
-    const b=S[i];
-    if (Math.abs(q.y-b.y) >= b.hh+0.3) continue;
-    const dxw=q.x-b.x, dzw=q.z-b.z;
-    const c=Math.cos(b.yaw), s=Math.sin(b.yaw);
-    const lx=dxw*c-dzw*s, lz=dxw*s+dzw*c;
-    if (Math.abs(lx)<b.hw+0.3 && Math.abs(lz)<b.hd+0.3) return true;
+  const idx=G.tower.idx;
+  const c0=Math.floor(q.y/CELDA);
+  for (let k=c0-1;k<=c0+1;k++){
+    const arr=idx.get(k);
+    if (!arr) continue;
+    for (let i=0;i<arr.length;i++){
+      const b=arr[i];
+      if (Math.abs(q.y-b.y) >= b.hh+0.3) continue;
+      const dxw=q.x-b.x, dzw=q.z-b.z;
+      const c=Math.cos(b.yaw), s=Math.sin(b.yaw);
+      const lx=dxw*c-dzw*s, lz=dxw*s+dzw*c;
+      if (Math.abs(lx)<b.hw+0.3 && Math.abs(lz)<b.hd+0.3) return true;
+    }
   }
   return false;
 }
 function updateShadow(){
   if (!G.tower){ W.shadow.visible=false; return; }
   let top=-Infinity;
-  const S=G.tower.solids;
-  for (let i=0;i<S.length;i++){
-    const b=S[i], ty=b.y+b.hh;
-    if (ty > G.py-HY+0.02) continue;
-    const dxw=G.px-b.x, dzw=G.pz-b.z;
-    const c=Math.cos(b.yaw), s=Math.sin(b.yaw);
-    const lx=dxw*c-dzw*s, lz=dxw*s+dzw*c;
-    if (Math.abs(lx)<b.hw+HX && Math.abs(lz)<b.hd+HZ && ty>top) top=ty;
+  // La sombra se desvanece a los 26 m de caída, así que no tiene sentido
+  // buscar plataformas más abajo: recorremos 4 cubos y paramos.
+  const idx=G.tower.idx;
+  const c0=Math.floor(G.py/CELDA);
+  for (let k=c0; k>=c0-4; k--){
+    const arr=idx.get(k);
+    if (!arr) continue;
+    for (let i=0;i<arr.length;i++){
+      const b=arr[i], ty=b.y+b.hh;
+      if (ty > G.py-HY+0.02) continue;
+      const dxw=G.px-b.x, dzw=G.pz-b.z;
+      const c=Math.cos(b.yaw), s=Math.sin(b.yaw);
+      const lx=dxw*c-dzw*s, lz=dxw*s+dzw*c;
+      if (Math.abs(lx)<b.hw+HX && Math.abs(lz)<b.hd+HZ && ty>top) top=ty;
+    }
+    if (top!==-Infinity) break;   // ya tenemos la más alta por debajo
   }
   if (top===-Infinity){ W.shadow.visible=false; return; }
   const drop=(G.py-HY)-top;
@@ -898,10 +1350,28 @@ function hud(){
   $("selfPip").style.top=clamp(100-(alt/G.altura)*100,-1,101)+"%";
   $("bestPip").style.top=clamp(100-(G.best/G.altura)*100,-1,101)+"%";
 
-  $("hNet").textContent = Net.online
-    ? (Net.esAnfitrion?"ANFITRIÓN · ":"SALA · ") + Net.total() + " EN LA TORRE"
-    : "SOLO";
-  $("hNet").style.color = Net.online ? "var(--signal)" : "";
+  // "SOLO" (nunca entraste a una sala) y "SIN CONEXIÓN" (te echaron de una)
+  // son cosas muy distintas y antes se veían igual.
+  const hn = $("hNet");
+  if (Net.online){
+    hn.textContent = "SALA " + Net.sala + " · " + Net.total() + " EN LA TORRE";
+    hn.style.color = "var(--signal)";
+  } else if (Net.dormido){
+    hn.textContent = "EN REPOSO";
+    hn.style.color = "";
+  } else if (Net.quiereEstar){
+    hn.textContent = "SIN CONEXIÓN";
+    hn.style.color = "var(--danger)";
+  } else {
+    hn.textContent = "SOLO";
+    hn.style.color = "";
+  }
+
+  // Rendimiento: si esto baja de 30, los "saltos de cámara" son el navegador
+  // ahogándose, no la red. Y el ping dice si el problema viene de fuera.
+  const p=$("hPerf");
+  p.textContent = Math.round(Perf.fps) + " fps" + (Net.online ? " · " + Net.ping + " ms" : "");
+  p.style.color = Perf.fps < 30 ? "var(--danger, #FF4D6D)" : (Perf.fps < 50 ? "var(--signal)" : "");
 
   // marcas de los amigos en la cinta altimétrica + lista abajo a la izquierda
   const otros = Net.otros();
@@ -922,14 +1392,25 @@ function hud(){
     u.style.color = o.color;
   });
 
+  // Reutilizamos las filas en vez de rehacer el HTML en cada fotograma:
+  // reconstruir el DOM 60 veces por segundo obliga al navegador a recalcular
+  // estilos y reubicar todo, y eso se nota como tirones.
   const ros=$("roster");
-  if (otros.length){
-    const orden = otros.slice().sort((a,b)=>b.y-a.y);
-    ros.innerHTML = orden.map(o =>
-      '<div class="rrow"><span class="sw" style="background:'+o.color+'"></span>'+
-      '<span class="nm"></span><span class="mt">'+Math.round(Math.max(0,o.y))+' m</span></div>').join("");
-    [...ros.children].forEach((row,i)=>{ row.children[1].textContent = orden[i].name; });
-  } else if (ros.innerHTML) ros.innerHTML="";
+  const orden = otros.slice().sort((a,b)=>b.y-a.y);
+  while (ros.children.length > orden.length) ros.lastChild.remove();
+  while (ros.children.length < orden.length){
+    const row=document.createElement("div"); row.className="rrow";
+    row.innerHTML='<span class="sw"></span><span class="nm"></span><span class="mt"></span>';
+    ros.appendChild(row);
+  }
+  for (let i=0;i<orden.length;i++){
+    const o=orden[i], row=ros.children[i];
+    const sw=row.children[0], nm=row.children[1], mt=row.children[2];
+    if (sw._c!==o.color){ sw.style.background=o.color; sw._c=o.color; }
+    if (nm._n!==o.name){ nm.textContent=o.name; nm._n=o.name; }
+    const m=Math.round(Math.max(0,o.y));
+    if (mt._m!==m){ mt.textContent=m+" m"; mt._m=m; }
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -954,49 +1435,106 @@ function urlServidor(){
   return "";   // abierto como archivo local: hace falta indicar el servidor
 }
 
+/* Reconexión automática.
+   El servidor echa a quien lleva un rato mudo, y dejamos de hablar en cuanto
+   el juego entra en pausa (Alt+Tab suelta el ratón y eso llama a pause()) o
+   la pestaña pasa a segundo plano (ahí el navegador congela el bucle entero).
+   Antes eso significaba quedarte fuera de la sala para siempre sin enterarte:
+   tu posición es 100% local, así que el juego seguía perfecto y simplemente
+   ya no veías a nadie. Ahora se vuelve a entrar solo.                        */
+const RECON_MIN = 800, RECON_MAX = 15000;
+
+/* SIESTA — una pestaña olvidada no debe costar datos eternamente.
+   El servidor reparte el estado 15 veces por segundo se mueva alguien o no,
+   así que un amigo AFK gasta casi lo mismo que uno jugando. Medido: una sala
+   de 4 con las pestañas abiertas un mes son ~59 GB, y de 16 son ~910 GB.
+   A los 10 minutos sin tocar teclado ni ratón nos salimos solos; con
+   cualquier tecla se vuelve a entrar en un segundo. */
+const SIESTA_MS = 10 * 60 * 1000;
+
 const Net = {
   ws:null, online:false, id:"yo",
   jugadores:new Map(),        // id -> {id,name,color,x,y,z,ry,best}
   ultimoEnvio:0, reintento:null,
+  ping:0, ultimoPing:0, pingEnviado:0,
+  sala:"", yo:null,           // se guardan para poder volver a entrar solos
+  quiereEstar:false,          // el usuario pidió estar en una sala
+  dormido:false,              // nos salimos solos por llevar 10 min sin tocar nada
+  dentroAlgunaVez:false,      // ya recibimos un init: lo siguiente es reconexión
+  intentos:0,                 // reintentos seguidos desde la última caída
+  aviso:"", avisoClase:"", avisoHasta:0,
   disponible(){ return typeof WebSocket !== "undefined"; },
 
   entrar(codigo, yo){
     this.cerrar();
+    this.sala = codigo;
+    this.yo = yo;
+    this.quiereEstar = true;
+    this.intentos = 0;
+    G.ultimaEntrada = performance.now();       // el reloj de la siesta, a cero
+    this.iniciarLatido();
+    this._abrir(false);
+  },
+
+  _abrir(esReintento){
     const base = urlServidor();
     if (!base){
       $("srvWrap").hidden = false;
       log("Has abierto el juego como archivo local. Pega la dirección de tu servidor arriba (wss://…/ws).","err");
+      this.quiereEstar = false;
       return;
     }
+    const codigo = this.sala;
     const url = base + (base.includes("?") ? "&" : "?") + "sala=" + encodeURIComponent(codigo);
-    log("Conectando con la sala " + codigo + "…");
+    if (!esReintento) log("Conectando con la sala " + codigo + "…");
     let ws;
     try { ws = new WebSocket(url); }
-    catch(e){ log("Dirección de servidor no válida.","err"); return; }
+    catch(e){ log("Dirección de servidor no válida.","err"); this.quiereEstar = false; return; }
     this.ws = ws;
 
-    const to = setTimeout(()=>{ if(!this.online) log("El servidor no responde. ¿Está bien la dirección?","err"); }, 9000);
+    const to = setTimeout(()=>{
+      if (!this.online && !esReintento) log("El servidor no responde. ¿Está bien la dirección?","err");
+    }, 9000);
 
     ws.onopen = () => {
       clearTimeout(to);
       this.online = true;
-      log("Conectado. Esperando la torre…","ok");
-      this.enviar({t:"hello", name:yo.name, color:yo.color,
-                   seed:G.code, altura:G.altura});
+      this.intentos = 0;
+      if (!esReintento) log("Conectado. Esperando la torre…","ok");
+      this.enviar({t:"hello", name:this.yo.name, color:this.yo.color,
+                   seed:G.code, altura:G.altura, dif:G.dif});
     };
     ws.onmessage = ev => {
       let d; try { d = JSON.parse(ev.data); } catch(e){ return; }
       if (!d || typeof d !== "object") return;
       if (d.t === "init"){
         this.id = String(d.id||"yo");
-        // el primero que entró fijó la torre: la reconstruimos si difiere
-        if (String(d.seed) !== String(G.code) || +d.altura !== G.altura){
-          $("seed").value = d.seed;
-          $("height").value = d.altura;
-          regenerate();
+        const difSala = difValida(d.dif);
+        const mismaTorre = String(d.seed) === String(G.code)
+                        && +d.altura === G.altura && difSala === G.dif;
+
+        if (!this.dentroAlgunaVez){
+          this.dentroAlgunaVez = true;
+          // el primero que entró fijó la torre: la reconstruimos si difiere
+          if (!mismaTorre){
+            $("seed").value = d.seed;
+            $("height").value = d.altura;
+            G.dif = difSala;              // la dificultad también la manda la sala
+            regenerate();
+          }
+          log("Dentro de la sala " + codigo + ".","ok");
+          play();
+        } else {
+          // RECONEXIÓN: ni regenerate() ni play(). Uno te cambiaría la torre
+          // bajo los pies; el otro te devolvería al suelo y pondría el
+          // cronómetro a cero. Vuelves exactamente donde estabas.
+          if (mismaTorre){
+            this.mostrar("DE VUELTA EN LA SALA", "ok", 2600);
+          } else {
+            this.mostrar("RECONECTADO, PERO LA SALA TIENE OTRA TORRE", "", 12000);
+            log("Al volver, la sala " + codigo + " tenía otra torre (semilla, altura o dificultad). Sal al menú y vuelve a entrar para subir la misma.","err");
+          }
         }
-        log("Dentro de la sala " + codigo + ".","ok");
-        play();
       } else if (d.t === "state" && Array.isArray(d.p)){
         d.p.forEach(pl => {
           if (!pl || pl.id === this.id) return;
@@ -1007,14 +1545,37 @@ const Net = {
         });
         const vivos = new Set(d.p.map(x=>x && x.id));
         [...this.jugadores.keys()].forEach(k=>{ if(!vivos.has(k)) this.jugadores.delete(k); });
+      } else if (d.t === "pong"){
+        // ida y vuelta real hasta el servidor, medido en el propio navegador
+        this.ping = Math.round(performance.now() - this.pingEnviado);
       }
     };
-    ws.onerror = () => { log("No se pudo conectar con el servidor.","err"); };
-    ws.onclose = () => {
-      const estaba = this.online;
-      this.online = false; this.jugadores.clear();
-      if (estaba) log("Se perdió la conexión con la sala.","err");
-    };
+    ws.onerror = () => { if (!esReintento) log("No se pudo conectar con el servidor.","err"); };
+    ws.onclose = () => { clearTimeout(to); this._caido(ws); };
+  },
+
+  /* Se cayó la conexión (o nos echaron por llevar un rato mudos). Mientras el
+     usuario no diga lo contrario, volvemos a entrar solos, esperando cada vez
+     un poco más para no machacar el servidor si está caído de verdad. */
+  _caido(ws){
+    if (ws !== this.ws) return;              // socket viejo, ya reemplazado
+    const estaba = this.online;
+    this.online = false; this.ping = 0; this.jugadores.clear();
+    this.ws = null;
+    if (!this.quiereEstar) return;
+    if (estaba) log("Se perdió la conexión con la sala. Reconectando…","err");
+    this.intentos++;
+    const espera = Math.min(RECON_MAX, RECON_MIN * Math.pow(2, Math.min(this.intentos - 1, 5)));
+    if (this.reintento) clearTimeout(this.reintento);
+    this.reintento = setTimeout(()=>{
+      this.reintento = null;
+      if (this.quiereEstar) this._abrir(true);
+    }, espera);
+  },
+
+  mostrar(texto, clase, ms){
+    this.aviso = texto; this.avisoClase = clase || "";
+    this.avisoHasta = performance.now() + (ms || 3000);
   },
 
   enviar(obj){
@@ -1022,22 +1583,153 @@ const Net = {
     try { this.ws.send(JSON.stringify(obj)); } catch(e){}
   },
 
+  _pos(){
+    return { t:"p",
+      x:+G.px.toFixed(2), y:+(G.py-HY).toFixed(2), z:+G.pz.toFixed(2),
+      ry:+(W.player ? W.player.rotation.y : 0).toFixed(2), best:Math.round(G.best) };
+  },
+
   tick(now){
     if (!this.online) return;
+    if (now - this.ultimoPing > 2000){
+      this.ultimoPing = now; this.pingEnviado = performance.now();
+      this.enviar({t:"ping"});
+    }
     if (now - this.ultimoEnvio < 1000/NET_HZ) return;
     this.ultimoEnvio = now;
-    this.enviar({ t:"p",
-      x:+G.px.toFixed(2), y:+(G.py-HY).toFixed(2), z:+G.pz.toFixed(2),
-      ry:+W.player.rotation.y.toFixed(2), best:Math.round(G.best) });
+    this.enviar(this._pos());
+  },
+
+  /* LATIDO — temporizador propio, fuera del bucle de dibujo.
+     tick() solo corre con el juego en modo "play", así que en pausa (Alt+Tab
+     suelta el ratón y eso pausa) o con la pestaña en segundo plano (ahí el
+     navegador congela requestAnimationFrame entero) dejabas de mandar nada y
+     el servidor te daba por mudo. Un setInterval sigue corriendo en los dos
+     casos: en segundo plano Chrome lo estrangula a una vez por minuto, que
+     con los 180 s de inactividad del servidor sobra de largo. */
+  iniciarLatido(){
+    if (this._latido) return;
+    this._latido = setInterval(()=>{
+      const now = performance.now();
+      // ¿Diez minutos sin tocar nada? Entonces no estás jugando: a dormir.
+      if (this.quiereEstar && now - G.ultimaEntrada > SIESTA_MS){ this.dormir(); return; }
+      if (!this.online) return;
+      if (now - this.ultimoEnvio < 4000) return;   // el bucle ya va sobrado
+      this.ultimoEnvio = now;
+      this.enviar(this._pos());
+    }, 5000);
+  },
+
+  /* Salirse por estar AFK. No es lo mismo que cerrar(): aquí queremos volver
+     en cuanto toques algo, y volver como RECONEXIÓN —sin play() ni
+     regenerate()— para no perder la altura ni el cronómetro. Por eso
+     dentroAlgunaVez se queda como está. */
+  dormir(){
+    if (this.dormido || !this.quiereEstar) return;
+    this.dormido = true;
+    this.quiereEstar = false;                 // que no reconecte sola
+    if (this.reintento){ clearTimeout(this.reintento); this.reintento = null; }
+    try { if (this.ws){ this.ws.onclose=null; this.ws.onerror=null; this.ws.close(); } } catch(e){}
+    this.ws = null; this.online = false; this.ping = 0; this.jugadores.clear();
+    this.intentos = 0; this.avisoHasta = 0;
+    log("En reposo para no gastar datos. Pulsa una tecla y vuelves a la sala.","");
+  },
+
+  despertar(){
+    if (!this.dormido) return;
+    this.dormido = false;
+    this.quiereEstar = true;
+    this.intentos = 0;
+    this.mostrar("VOLVIENDO A LA SALA…", "ok", 3000);
+    this._abrir(true);
   },
 
   otros(){ return [...this.jugadores.values()]; },
   total(){ return this.jugadores.size + (this.online ? 1 : 0); },
+
+  /* Cerrar es SIEMPRE una decisión del usuario (menú, o entrar a otra sala).
+     Baja quiereEstar antes de tocar el socket para que _caido no reconecte. */
   cerrar(){
-    try { if (this.ws){ this.ws.onclose=null; this.ws.close(); } } catch(e){}
-    this.ws=null; this.online=false; this.jugadores.clear();
+    this.quiereEstar = false; this.dentroAlgunaVez = false; this.intentos = 0;
+    this.dormido = false; this.avisoHasta = 0;
+    if (this.reintento){ clearTimeout(this.reintento); this.reintento = null; }
+    try { if (this.ws){ this.ws.onclose=null; this.ws.onerror=null; this.ws.close(); } } catch(e){}
+    this.ws=null; this.online=false; this.ping=0; this.jugadores.clear();
   }
 };
+
+/* Pinta el estado de la red. Se llama desde el bucle en TODOS los modos (no
+   solo jugando) porque el caso que importa es justo el contrario: vuelves de
+   estar AFK, estás en la pantalla de pausa, y ahí es donde tienes que ver si
+   sigues en la sala o no. */
+/* El enlace que le pasas a un amigo: abre el juego y entra a tu sala sola,
+   porque al arrancar se lee  #sala=ABCD  del hash. */
+function enlaceSala(){
+  return location.origin + location.pathname + "#sala=" + Net.sala;
+}
+
+function pintarRed(){
+  // Código de sala a la vista arriba a la derecha mientras juegas.
+  const enSala = (Net.quiereEstar || Net.dormido) && Net.sala;
+  const sw = $("sala");
+  if (enSala){
+    if (sw.hidden) sw.hidden = false;
+    if (sw._c !== Net.sala){ sw._c = Net.sala; $("hSalaCod").textContent = Net.sala; }
+    const cnt = Net.online ? Net.total() + " EN LA TORRE"
+              : (Net.dormido ? "EN REPOSO" : "SIN CONEXIÓN");
+    if (sw._n !== cnt){
+      sw._n = cnt;
+      const el = $("hSalaCnt");
+      el.textContent = cnt;
+      el.style.color = Net.online ? "" : (Net.dormido ? "" : "var(--danger)");
+    }
+  } else if (!sw.hidden) sw.hidden = true;
+
+  // Bloque de invitación de la pausa: se mantiene solo, no depende de por
+  // dónde hayas entrado en pausa.
+  const inv = $("pInvite");
+  if (enSala){
+    if (inv.hidden) inv.hidden = false;
+    if (inv._c !== Net.sala){
+      inv._c = Net.sala;
+      $("pCode").textContent = Net.sala;
+      $("pLink").textContent = enlaceSala();
+    }
+  } else if (!inv.hidden){ inv.hidden = true; inv._c = null; }
+
+  const w = $("netwarn"), pn = $("pNet");
+  let txt = "", cls = "", pulso = false;
+
+  if (Net.dormido){
+    txt = "EN REPOSO · PULSA UNA TECLA PARA VOLVER A LA SALA"; cls = "zzz";
+  } else if (Net.quiereEstar && !Net.online){
+    txt = "SIN CONEXIÓN CON LA SALA · RECONECTANDO"
+        + (Net.intentos > 1 ? " (" + Net.intentos + ")" : "…");
+    pulso = true;
+  } else if (Net.avisoHasta > performance.now()){
+    txt = Net.aviso; cls = Net.avisoClase;
+  }
+
+  if (w._t !== txt || w._c !== cls){
+    w._t = txt; w._c = cls;
+    w.textContent = txt;
+    w.className = "lay " + cls + (pulso ? " pulse" : "");
+    w.hidden = !txt;
+  }
+  // Misma información en la pantalla de pausa, que es lo que ves al volver.
+  let ptxt = "", pcls = "";
+  if (Net.dormido){
+    ptxt = "En reposo para no gastar datos — pulsa una tecla y vuelves a la sala " + Net.sala + ".";
+  } else if (Net.quiereEstar && !Net.online){
+    ptxt = "Sin conexión con la sala — reconectando"
+         + (Net.intentos > 1 ? " (intento " + Net.intentos + ")" : "…"); pcls = "err";
+  } else if (Net.online){
+    ptxt = "En la sala " + Net.sala + " · " + Net.total() + " en la torre."; pcls = "ok";
+  }
+  if (pn._t !== ptxt){
+    pn._t = ptxt; pn.textContent = ptxt; pn.className = "note " + pcls;
+  }
+}
 
 function log(msg, cls){
   const el = $("netlog");
@@ -1084,8 +1776,9 @@ function syncRemotos(dt){
       const g=avatar(o.color);
       const l=etiqueta(o.name||"?", o.color); l.position.y=2.2; g.add(l);
       W.scene.add(g); g.position.set(o.x,o.y,o.z);
-      r={g,l,name:o.name}; remotos.set(o.id,r);
+      r={g,l,name:o.name,ausente:0}; remotos.set(o.id,r);
     }
+    r.ausente=0;
     if (r.name!==o.name){
       r.g.remove(r.l); r.l=etiqueta(o.name||"?",o.color); r.l.position.y=2.2; r.g.add(r.l); r.name=o.name;
     }
@@ -1097,7 +1790,14 @@ function syncRemotos(dt){
     r.g.position.z += (o.z-r.g.position.z)*k;
     r.g.rotation.y = o.ry;
   });
-  remotos.forEach((r,id)=>{ if(!vistos.has(id)){ W.scene.remove(r.g); remotos.delete(id); } });
+  // Si a un amigo le falta UN paquete no lo borramos: reconstruir su avatar
+  // significa crear una textura nueva para la etiqueta, y eso son milisegundos
+  // de tirón. Le damos un segundo y medio de margen antes de quitarlo.
+  remotos.forEach((r,id)=>{
+    if (vistos.has(id)) return;
+    r.ausente += dt;
+    if (r.ausente > 1.5){ W.scene.remove(r.g); remotos.delete(id); }
+  });
 }
 function limpiarRemotos(){
   remotos.forEach(r=>W.scene.remove(r.g));
@@ -1108,9 +1808,24 @@ function limpiarRemotos(){
    8 · Bucle
    ═══════════════════════════════════════════════════════════════ */
 let last=performance.now();
+
+/* Medidor de fotogramas. Sin esto, "la cámara pega un salto" es una
+   impresión; con esto es un número que podemos comparar entre máquinas. */
+const Perf = { fps:60, peorMs:0, _n:0, _acc:0, _t:0,
+  muestra(now, ms){
+    this._n++; this._acc+=ms;
+    if (ms>this.peorMs) this.peorMs=ms;
+    if (now-this._t > 500){
+      this.fps = 1000/(this._acc/this._n);
+      this._n=0; this._acc=0; this._t=now;
+    }
+  }
+};
+
 function loop(now){
   requestAnimationFrame(loop);
   let dt=(now-last)/1000; last=now;
+  Perf.muestra(now, dt*1000);
   if (dt>0.1) dt=0.1;
 
   if (G.mode==="play"){
@@ -1132,6 +1847,10 @@ function loop(now){
     hud();
   }
 
+  // Fuera del if de arriba a propósito: el aviso de red tiene que verse
+  // también en pausa, que es justo cuando te echan por estar AFK.
+  pintarRed();
+
   if (G.mode==="play"||G.mode==="pause"||G.mode==="win"){ syncRemotos(dt); updateCamera(dt); }
   else {
     const a=now*0.00007;
@@ -1145,10 +1864,38 @@ function loop(now){
 /* ═══════════════════════════════════════════════════════════════
    9 · Flujo
    ═══════════════════════════════════════════════════════════════ */
+/* Pinta el selector y deja marcada la dificultad activa. */
+function pintarDifs(){
+  const cont = $("difs");
+  if (!cont.children.length){
+    for (const id of Object.keys(DIFS)){
+      const d = DIFS[id];
+      const b = document.createElement("button");
+      b.className = "dbtn"; b.dataset.d = id;
+      b.innerHTML = "<strong></strong><small></small><span class='alt'></span>";
+      b.children[0].textContent = d.nombre;
+      b.children[1].textContent = d.lema;
+      b.children[2].textContent = d.altura + " M POR DEFECTO";
+      b.addEventListener("click", ()=>elegirDif(id));
+      cont.appendChild(b);
+    }
+  }
+  [...cont.children].forEach(b=>b.classList.toggle("on", b.dataset.d===G.dif));
+}
+function elegirDif(id){
+  id = difValida(id);
+  if (id === G.dif) return;
+  G.dif = id;
+  $("height").value = DIFS[id].altura;   // la altura por defecto va con ella
+  pintarDifs();
+  regenerate();
+}
+
 function regenerate(){
   G.code=$("seed").value.trim()||"20260918";
-  G.altura=clamp(parseFloat($("height").value)||800,50,2000);
-  G.tower=buildTower(G.code, G.altura);
+  G.altura=clamp(parseFloat($("height").value)||DIFS[G.dif].altura,50,3000);
+  G.tower=buildTower(G.code, G.altura, G.dif);
+  pintarDifs();
   buildMeshes(G.tower);
   respawn();
   buildTicks();
@@ -1161,11 +1908,22 @@ function regenerate(){
     spec("SUBE (DOBLE)", CAPS.doubleRise.toFixed(1)+" m", false) +
     spec("PIEZAS", inf.piezas, false) +
     spec("ALTURA", Math.round(G.tower.altura)+" m", false) +
-    spec("SALTO MÁS DURO", Math.round(inf.peor*100)+"%", inf.peor>1);
-  $("verif").innerHTML = inf.imposibles===0
-    ? "Verificación: <b>todos los saltos son alcanzables</b>. El más exigente pide "
+    spec("SALTO MÁS DURO", Math.round(inf.peor*100)+"%", inf.peor>1) +
+    (inf.cornisas ? spec("CORNISAS", inf.cornisas, true) : "") +
+    (inf.senderos ? spec("SENDEROS", inf.senderos, true) : "");
+  let v = inf.imposibles===0
+    ? "Verificación: <b>los " + inf.saltosNormales + " saltos son alcanzables</b>. El más exigente pide "
       + inf.peorD.toFixed(1) + " m cruzando y " + inf.peorDy.toFixed(1) + " m subiendo."
     : "<span style='color:var(--danger)'>" + inf.imposibles + " saltos imposibles.</span>";
+  // Las piezas especiales no las cubre esa fórmula; se dice, no se esconde.
+  if (inf.cornisas || inf.senderos){
+    v += "<br>Aparte: <b>" + inf.cornisas + "</b> cornisas (" + inf.nivelesCornisa
+       + " repisas, voladizo máx " + inf.peorVoladizo.toFixed(2) + " m) y <b>"
+       + inf.senderos + "</b> senderos (" + inf.tramosSendero + " tramos, el más fino "
+       + inf.senderoMasFino.toFixed(2) + " m). Estas no las mide la fórmula de "
+       + "distancia: van con márgenes calibrados con el motor del juego.";
+  }
+  $("verif").innerHTML = v;
 }
 function spec(k,v,em){
   return '<div class="spec"><span class="k">'+k+'</span><span class="v'+(em?' em':'')+'">'+v+'</span></div>';
@@ -1183,8 +1941,32 @@ function pause(){
   $("pAlt").textContent=Math.round(Math.max(0,G.py))+" m";
   $("pBest").textContent=Math.round(G.best)+" m";
   $("pTime").textContent=fmt(G.elapsed);
+  $("btnCopiar").querySelector("strong").textContent="COPIAR ENLACE";
+  pintarRed();                       // deja el bloque de invitación al día
   $("pause").hidden=false;
   if (document.exitPointerLock) document.exitPointerLock();
+}
+/* Copiar al portapapeles. navigator.clipboard necesita contexto seguro (en
+   producción lo es, https), así que hay respaldo para cuando no lo hay. */
+async function copiarEnlace(){
+  const txt=enlaceSala(), b=$("btnCopiar").querySelector("strong");
+  let ok=false;
+  try {
+    if (navigator.clipboard && window.isSecureContext){
+      await navigator.clipboard.writeText(txt); ok=true;
+    }
+  } catch(e){}
+  if (!ok){
+    try {
+      const ta=document.createElement("textarea");
+      ta.value=txt; ta.style.position="fixed"; ta.style.opacity="0";
+      document.body.appendChild(ta); ta.select();
+      ok=document.execCommand("copy");
+      document.body.removeChild(ta);
+    } catch(e){}
+  }
+  b.textContent = ok ? "COPIADO ✓" : "COPIA EL ENLACE DE ARRIBA A MANO";
+  setTimeout(()=>{ b.textContent="COPIAR ENLACE"; }, 2200);
 }
 function resume(){ $("pause").hidden=true; G.mode="play"; lock(); }
 function win(){
@@ -1222,6 +2004,17 @@ function lock(){
 
 /* entrada */
 let hadLock=false, dragging=false;
+
+/* Cualquier señal de que hay alguien delante: reinicia el reloj de la siesta
+   y, si ya nos habíamos salido por AFK, vuelve a entrar a la sala. */
+function actividad(){
+  G.ultimaEntrada = performance.now();
+  if (Net.dormido) Net.despertar();
+}
+for (const ev of ["keydown","mousedown","wheel","touchstart"])
+  addEventListener(ev, actividad, {passive:true});
+// el ratón solo cuenta si se mueve de verdad
+addEventListener("mousemove", e=>{ if (e.movementX||e.movementY) actividad(); }, {passive:true});
 addEventListener("keydown",e=>{
   if (e.code==="Space" && G.mode==="play") e.preventDefault();
   if (G.keys[e.code]) return;
@@ -1269,6 +2062,7 @@ $("btnRegen").addEventListener("click",()=>{
   $("seed").value=String(Math.floor(Math.random()*99999999));
   regenerate();
 });
+$("btnCopiar").addEventListener("click",()=>copiarEnlace());
 $("btnResume").addEventListener("click",()=>resume());
 $("btnReset").addEventListener("click",()=>{ respawn(); $("pause").hidden=true; G.mode="play"; lock(); });
 $("btnMenu").addEventListener("click",()=>toMenu());
@@ -1288,10 +2082,14 @@ requestAnimationFrame(loop);
 // Gancho de depuración: solo con #debug en la URL. Sirve para medir la
 // corrección de posición al aterrizar y comprobar que no hay tirón.
 if (/\bdebug\b/.test(location.hash)){
-  window.__T = { G, CAPS, AV, play, respawn, Net,
+  window.__T = { G, CAPS, AV, play, respawn, Net, Perf,
+                 regenerate, buildTower, indexarTorre, doJump, JumpMath, MURO_ALTO,
+                 colocarSendero, colocarCornisa, DIFS,
                  caps:()=>JumpMath.compute(),
                  informe:()=>G.tower.informe,
-                 remotosCount:()=>remotos.size };
+                 remotosCount:()=>remotos.size,
+                 physicsStep, resolveCollisions, updateShadow, hitsSolid,
+                 CELDA, cubos:()=>G.tower.idx.size };
 }
 
 })();

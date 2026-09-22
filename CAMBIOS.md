@@ -1,3 +1,228 @@
+# Cambios — 22 de septiembre de 2026 (decimosexto lote): panel privado
+
+Un panel solo para ti: quién está jugando ahora mismo, en qué sala, con qué
+nombre se puso, a qué altura va y cuánto lleva dentro. Se abre desde el móvil
+o desde el ordenador sin entrar al juego.
+
+## Lo primero: `/salas` estaba abierto de par en par
+
+Antes de añadir nada había que quitar algo. El servidor tenía esto:
+
+```js
+  if (ruta === "/salas") { ...códigos de sala, semilla, dificultad, cuántos hay... }
+```
+
+Sin contraseña y sin nada. Cualquiera que escribiera esa dirección veía **los
+códigos de las salas abiertas**, que son exactamente los códigos que hacen
+falta para **entrar** en ellas. Nunca lo usó nadie porque nadie lo sabía, que
+es otra forma de decir que no estaba protegido.
+
+Ya no existe. Esos datos viven ahora detrás del panel.
+
+## Cómo está protegido, y qué significa eso de verdad
+
+Una sola cosa: **que nadie conozca su dirección**. Elegiste eso frente a la
+contraseña y es tu panel, pero conviene que quede escrito qué cubre y qué no,
+porque dentro hay nombres de otras personas.
+
+La dirección **no está en este repositorio**. No puede estarlo: el repositorio
+es público, así que una ruta escrita en `server.js` estaría publicada en
+GitHub el mismo día y no protegería absolutamente nada. Viene de la variable
+de entorno `PANEL_RUTA`, que se pone en Coolify y no sale de ahí.
+
+**Si esa variable no existe, el panel tampoco.** No se sirve, no responde, no
+hay nada que encontrar. Esa es la postura por defecto y es la que tiene
+cualquiera que se baje este repositorio.
+
+Lo que sí se ha hecho para que la dirección no se escape sola:
+
+- `x-robots-tag: noindex, nofollow, noarchive` — que no acabe en un buscador.
+- `referrer-policy: no-referrer` — si desde el panel pinchas un enlace, el
+  sitio de destino no ve de dónde venías.
+- `cache-control: no-store` — no se queda en ninguna caché por el camino.
+- La ruta **no se escribe en los registros**. Al arrancar, el servidor dice si
+  el panel está encendido, nunca dónde. Los logs de Coolify se leen desde el
+  navegador y se copian y se pegan.
+- Una ruta equivocada **no responde 401 ni 403**: devuelve el juego, igual que
+  cualquier dirección inventada. Contestar «no autorizado» sería confirmar que
+  ahí hay algo, que es justo lo único que protege a este panel.
+
+Y lo que **no** cubre, dicho claro: la dirección queda en tu historial, en el
+portapapeles, en el registro de cualquier proxy por el que pase, y en la
+pantalla si se la enseñas a alguien. Quien la vea una vez la tiene para
+siempre y no se le puede quitar. Ponerle además una contraseña son unas diez
+líneas el día que quieras.
+
+## Qué enseña
+
+Por sala: código, dificultad, altura de la torre, semilla y cuánto lleva
+abierta. Por jugador: nombre con su color, altura actual, récord de la sesión,
+cuánto lleva dentro, y un aviso en ámbar — **sin moverse** — cuando lleva más
+de doce segundos sin mandar posición, que es lo que distingue a quien está
+jugando de quien dejó la pestaña abierta y se fue.
+
+Se refresca solo cada tres segundos. Con la pestaña de fondo **no pide nada**:
+no tiene por qué estar despertando al servidor desde un móvil en el bolsillo.
+
+No guarda nada. Es una foto de la memoria viva del relay; en cuanto alguien
+cierra el juego, desaparece del panel y no queda registro en ninguna parte.
+
+## Un detalle que no es un detalle
+
+El nombre lo escribe cada jugador en su navegador y llega aquí tal cual. Si el
+panel lo pintara sin más, quien se pusiera `<img src=x onerror=...>` estaría
+ejecutando código **en mi propio panel**. Lo mismo con el color, que acaba en
+un atributo `style`.
+
+Los dos se comprueban: el nombre se escapa carácter a carácter y el color solo
+se acepta si es un color de verdad (`/^#[0-9a-fA-F]{3,8}$/`), y si no, se
+sustituye por el de siempre. Hay una prueba con un jugador llamado
+`<b>hola</b>` que exige verlo **con sus picoparéntesis y sin negrita**.
+
+## Lo que hay que hacer en Coolify (una vez)
+
+Generas una dirección al azar **en tu máquina** — no la pegues en ningún chat,
+igual que el token y la clave SSH:
+
+```powershell
+$b=[byte[]]::new(15)
+[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
+"panel-" + [Convert]::ToBase64String($b).Replace('+','-').Replace('/','_')
+```
+
+(Son 120 bits de azar de verdad — `Get-Random` a secas no sirve para algo que
+es la única protección que tiene el panel.)
+
+En Coolify, en la aplicación de Torre Vertical → *Environment Variables* →
+añadir `PANEL_RUTA` con ese valor → redesplegar. El panel queda en
+`https://tu-dominio/ese-valor`.
+
+Mientras Coolify siga sin dominio propio y vaya por HTTP en claro, esa
+dirección **viaja sin cifrar** en cada visita. Para un panel que se protege
+solo con su dirección, eso importa más de lo normal.
+
+## Cómo se ha comprobado
+
+`test/panel.js` arranca el servidor de verdad, mete jugadores de verdad por
+WebSocket y abre el panel en un navegador de verdad: 51 comprobaciones.
+
+Las peticiones van con un socket a pelo y la ruta escrita a mano en la primera
+línea del mensaje. Con `fetch()` o con la URL de Node, `/a/../b` se normaliza
+**antes de salir** y la prueba pasa por el motivo equivocado — eso ya pasó con
+el guardia de `/modelos/` y no se repite.
+
+Y como una prueba que nunca has visto fallar no sirve de nada, se rompió el
+servidor a propósito tres veces:
+
+| lo que se rompió | fallos |
+|---|---|
+| devolver `/salas` al aire | 1 |
+| quitar el escapado de los nombres | 2 |
+| contestar `403` en las rutas casi correctas | 7 |
+
+### Dos cosas que medí mal por el camino
+
+**El cuerpo troceado.** Hablando HTTP a mano hay que deshacer a mano lo que el
+servidor hace por su cuenta: sin `content-length`, Node responde troceado y el
+cuerpo llega como `3c\r\n{...}\r\n0\r\n\r\n`. `JSON.parse` se atragantaba en
+el carácter 4 y el error no se parecía en nada a la causa.
+
+**Un 403 que no era una fuga.** La prueba de `/modelos/../<ruta>` fallaba con
+403, y por un momento pareció un agujero. No lo era: ese 403 lo da el guardia
+de los modelos y lo da **igual** lleve detrás el panel o cualquier tontería. Le
+estaba pidiendo a esa ruta que devolviera el juego, algo que nunca hizo. La
+prueba correcta no es «devuelve el juego», es **«las dos respuestas son
+idénticas»**, que es lo único que de verdad importa.
+
+## Archivos tocados
+
+- `server.js` — el panel entero (página incluida), `/salas` fuera, dos marcas
+  de tiempo nuevas en sala y jugador para poder decir «dentro hace 8 min».
+
+La página va dentro de `server.js` en texto, y no en un archivo aparte a
+propósito: el `Dockerfile` copia archivo por archivo y ya nos pasó una vez que
+una carpeta no entró en la imagen y el fallo salió en producción sin que nada
+se quejara aquí. Lo que vive en `server.js` no se puede olvidar de copiar.
+
+`index.html`, `Dockerfile` y `package.json` siguen igual.
+
+---
+
+# Cambios — 22 de septiembre de 2026 (decimoquinto lote): ciclo día / noche
+
+El cielo cambia a lo largo de la subida: **amanecer → día → atardecer →
+noche**, y lo mueve la **altura**, no el reloj.
+
+## Por qué la altura y no el tiempo
+
+No es una decisión estética. Es determinista: dos amigos en la misma sala
+ven exactamente el mismo cielo **sin que el servidor mande un solo byte de
+más**, porque ambos saben a qué altura está cada uno. Con un ciclo por
+tiempo habría que sincronizar un reloj entre todos, y un jugador que entra
+tarde vería un cielo distinto.
+
+De regalo, el cielo te dice cuánto te queda sin mirar el altímetro.
+
+```js
+p = py / altura        // 0 al pie, 1 en la cima
+```
+
+Cuatro fases en p = 0,00 · 0,35 · 0,70 · 1,00, interpoladas con suavizado
+para que no haya esquinas. El **atardecer conserva exactamente los valores
+con los que nació el juego**, así que su aspecto de siempre sigue ahí, solo
+que ahora es un momento del recorrido y no el único.
+
+Se mueven los 5 colores del cielo, la dirección del sol, la niebla (color y
+densidad), las 4 luces y la opacidad de las nubes.
+
+## La noche oscurece de verdad, y los bordes se siguen leyendo
+
+Los cantos de las plataformas usan `MeshBasicMaterial`, que **no depende de
+la luz**. O sea que de noche siguen brillando sin hacer nada. Medido
+renderizando y contando píxeles:
+
+| altura | fase | escena | cielo | contraste | cantos |
+|---|---|---|---|---|---|
+| 0 m | amanecer | 0,302 | 0,389 | 0,087 | 0,683 |
+| 630 m | día | 0,662 | 0,599 | 0,064 | 0,669 |
+| 1260 m | atardecer | 0,096 | 0,299 | 0,203 | 0,543 |
+| 1800 m | **noche** | **0,099** | 0,197 | 0,097 | **0,675** |
+
+La escena de noche es **6,7 veces más oscura** que de día pero sigue
+distinguiéndose del cielo, y los cantos brillan **0,675 de noche contra
+0,669 de día** — idénticos, como estaban diseñados.
+
+Los valores de la noche no salieron a ojo: la primera versión medía **0,018
+de luminancia**, o sea negro, y se subieron hasta que la escena se lee.
+
+## Tres veces me equivoqué midiendo, y las tres eran mi banco
+
+Esta parte vale más que el código:
+
+1. **El cielo medía 0,000 por encima de 1.400 m.** Parecía un fallo gordo
+   del juego: la esfera del cielo tiene radio 1.400 y está centrada en el
+   origen. Pero el juego **sí** la mueve con la cámara cada fotograma; mi
+   prueba llamaba a `render()` a pelo, saltándose esa línea. Medía el
+   exterior de la esfera.
+2. **"Los cantos no se ven de noche"** — con una cámara fija apuntando al
+   eje, a 1.260 m salían 12.814 píxeles de canto y a 630 m ninguno. Estaba
+   midiendo el encuadre. Corregido apuntando a un canto real de cada altura.
+3. **Las cuatro capturas de las fases salieron idénticas.** El bucle
+   recalcula la fase por altura en cada fotograma y pisaba la que yo
+   forzaba. En vez de pelearme con eso, a la torre se le da la altura que
+   hace que ese punto caiga en la fase buscada — el mismo camino que sigue
+   el juego.
+
+## Y una prueba que era una carrera
+
+La batería táctil falló una vez en el doble salto y pasó tres seguidas
+después. Esperaba **350 ms de reloj** a que el jugador aterrizara; bajo
+carga seguía en el aire y ya había gastado un salto. Ahora espera a que
+`G.grounded` sea cierto. Una prueba que falla a veces es peor que no
+tenerla: enseña a ignorar los fallos.
+
+---
+
 # Cambios — 22 de septiembre de 2026 (decimocuarto lote): la minitorre
 
 Un nivel pequeño de verdad dentro del laboratorio, **~11 m y 10 estaciones

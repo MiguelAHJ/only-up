@@ -1198,16 +1198,20 @@ function initWorld(){
   }));
   W.scene.add(W.sky);
 
-  W.scene.add(new THREE.HemisphereLight(0xC8B6D8,0x181C28,0.5));
-  const sun=new THREE.DirectionalLight(0xFFA062,0.95); sun.position.set(60,22,-90); W.scene.add(sun);
-  const fill=new THREE.DirectionalLight(0x4E6AAE,0.55); fill.position.set(-50,40,60); W.scene.add(fill);
-  W.scene.add(new THREE.AmbientLight(0x38304E,0.55));
+  /* Se guardan las luces en W porque el ciclo día/noche las va a mover.
+     Los valores de aquí son los del ATARDECER, que es el momento con el
+     que nació el juego; el ciclo los vuelve a poner tal cual en su fase. */
+  W.hemi = new THREE.HemisphereLight(0xC8B6D8,0x181C28,0.5); W.scene.add(W.hemi);
+  W.sun  = new THREE.DirectionalLight(0xFFA062,0.95); W.sun.position.set(60,22,-90); W.scene.add(W.sun);
+  W.fill = new THREE.DirectionalLight(0x4E6AAE,0.55); W.fill.position.set(-50,40,60); W.scene.add(W.fill);
+  W.amb  = new THREE.AmbientLight(0x38304E,0.55); W.scene.add(W.amb);
 
   const ct=cloudTexture();
   [{y:-40,s:900,o:0.46},{y:-85,s:1300,o:0.32},{y:-150,s:1900,o:0.22}].forEach((L,i)=>{
     const m=new THREE.Mesh(new THREE.PlaneGeometry(L.s,L.s),
       new THREE.MeshBasicMaterial({map:ct,transparent:true,opacity:L.o,depthWrite:false,fog:false}));
     m.rotation.x=-Math.PI/2; m.position.y=L.y; m.userData.spin=0.0004/(i+1);
+    m.userData.op0=L.o;
     W.scene.add(m); W.clouds.push(m);
   });
 
@@ -1317,6 +1321,104 @@ function buildMeshes(tower){
   }
   for (const im of mallas.values()) im.instanceMatrix.needsUpdate = true;
   W.scene.add(W.group);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   4b · Ciclo día / noche
+   Lo mueve la ALTURA, no el reloj: sales al amanecer y llegas de noche.
+   Esa decisión tiene una ventaja que no es estética — es determinista, así
+   que dos amigos en la misma sala ven exactamente el mismo cielo sin que
+   el servidor mande un solo byte de más. Y de paso el cielo te dice
+   cuánto te queda sin mirar el altímetro.
+
+   Los cantos amarillos de las plataformas usan MeshBasicMaterial, que no
+   depende de la luz, así que de noche siguen brillando sin hacer nada:
+   oscurece de verdad pero los bordes se siguen leyendo.
+   ═══════════════════════════════════════════════════════════════ */
+const FASES = [
+  { p:0.00, nombre:"amanecer",
+    cZ:0x1B2A55, cM:0x6E5A86, cH:0xF0A06A, cA:0x1A1428, cS:0xFFD9A8,
+    sol:[0.62,0.10,-0.78], niebla:0x3A3352, densidad:0.0032,
+    hemiC:0xD8C6E0, hemiS:0x1C2030, hemiI:0.55,
+    solC:0xFFB98A, solI:0.85, solPos:[60,16,-90],
+    relC:0x5E7ABE, relI:0.50, ambC:0x3E3A58, ambI:0.50, nubes:1.00 },
+  { p:0.35, nombre:"día",
+    cZ:0x2F6FC4, cM:0x7EB2E8, cH:0xCFE4F5, cA:0x9FB6C8, cS:0xFFFFFF,
+    sol:[0.25,0.80,-0.55], niebla:0x9FB6C8, densidad:0.0022,
+    hemiC:0xEAF2FF, hemiS:0x6A7080, hemiI:0.85,
+    solC:0xFFF6E0, solI:1.35, solPos:[40,90,-40],
+    relC:0x9FC0E8, relI:0.45, ambC:0x8FA0B8, ambI:0.55, nubes:0.85 },
+  { p:0.70, nombre:"atardecer",          // el aspecto con el que nació el juego
+    cZ:0x0D1230, cM:0x4A3560, cH:0xE07A3C, cA:0x140E20, cS:0xFFB36B,
+    sol:[0.55,0.06,-0.83], niebla:0x30243E, densidad:0.0034,
+    hemiC:0xC8B6D8, hemiS:0x181C28, hemiI:0.50,
+    solC:0xFFA062, solI:0.95, solPos:[60,22,-90],
+    relC:0x4E6AAE, relI:0.55, ambC:0x38304E, ambI:0.55, nubes:1.00 },
+  /* Los valores de noche NO salieron a ojo. La primera versión medía 0,018
+     de luminancia en la escena: negro. Se subieron hasta que la escena se
+     lee y sigue siendo clarísimamente de noche — ver test/cielo.js. */
+  { p:1.00, nombre:"noche",
+    cZ:0x070C22, cM:0x141E4A, cH:0x35447A, cA:0x0A0E1E, cS:0xC8D8FF,
+    sol:[-0.40,0.55,-0.73], niebla:0x161C38, densidad:0.0034,
+    hemiC:0x8C9AD0, hemiS:0x161C34, hemiI:0.95,
+    solC:0xC6D4FF, solI:0.70, solPos:[-60,60,-70],
+    relC:0x4A5EA8, relI:0.50, ambC:0x3E4A80, ambI:0.85, nubes:0.55 },
+];
+
+const _cA1=new THREE.Color(), _cB1=new THREE.Color();
+let _cicloP = -1;
+function aplicarCielo(p){
+  if (!W.sky) return;
+  p = clamp(p, 0, 1);
+  if (Math.abs(p - _cicloP) < 0.0008) return;    // no repintar por nada
+  _cicloP = p;
+  let i = 0;
+  while (i < FASES.length-2 && p > FASES[i+1].p) i++;
+  const A = FASES[i], B = FASES[i+1];
+  const t = clamp((p - A.p) / (B.p - A.p), 0, 1);
+  // suavizado: las transiciones entre fases no deben tener esquinas
+  const k = t*t*(3-2*t);
+  const col = (u, a, b) => { _cA1.setHex(a); _cB1.setHex(b); u.value.copy(_cA1).lerp(_cB1, k); };
+  const num = (a, b) => a + (b-a)*k;
+
+  const U = W.sky.material.uniforms;
+  col(U.cZ, A.cZ, B.cZ); col(U.cM, A.cM, B.cM); col(U.cH, A.cH, B.cH);
+  col(U.cA, A.cA, B.cA);  col(U.cS, A.cS, B.cS);
+  U.sunDir.value.set(num(A.sol[0],B.sol[0]), num(A.sol[1],B.sol[1]), num(A.sol[2],B.sol[2])).normalize();
+
+  _cA1.setHex(A.niebla); _cB1.setHex(B.niebla);
+  W.scene.fog.color.copy(_cA1).lerp(_cB1, k);
+  W.scene.fog.density = num(A.densidad, B.densidad);
+
+  _cA1.setHex(A.hemiC); _cB1.setHex(B.hemiC); W.hemi.color.copy(_cA1).lerp(_cB1,k);
+  _cA1.setHex(A.hemiS); _cB1.setHex(B.hemiS); W.hemi.groundColor.copy(_cA1).lerp(_cB1,k);
+  W.hemi.intensity = num(A.hemiI, B.hemiI);
+
+  _cA1.setHex(A.solC); _cB1.setHex(B.solC); W.sun.color.copy(_cA1).lerp(_cB1,k);
+  W.sun.intensity = num(A.solI, B.solI);
+  W.sun.position.set(num(A.solPos[0],B.solPos[0]), num(A.solPos[1],B.solPos[1]), num(A.solPos[2],B.solPos[2]));
+
+  _cA1.setHex(A.relC); _cB1.setHex(B.relC); W.fill.color.copy(_cA1).lerp(_cB1,k);
+  W.fill.intensity = num(A.relI, B.relI);
+  _cA1.setHex(A.ambC); _cB1.setHex(B.ambC); W.amb.color.copy(_cA1).lerp(_cB1,k);
+  W.amb.intensity = num(A.ambI, B.ambI);
+
+  const fn = num(A.nubes, B.nubes);
+  for (const c of W.clouds) c.material.opacity = (c.userData.op0 || 0.3) * fn;
+}
+
+/* La altura manda: 0 al pie y 1 en la cima. En el menú y al reaparecer
+   sale el amanecer, que es donde empieza la subida. */
+function progresoCielo(){
+  const alt = (G.tower && G.tower.altura) ? G.tower.altura : G.altura;
+  return clamp(G.py / Math.max(1, alt), 0, 1);
+}
+function faseActual(){
+  const p = progresoCielo();
+  let i = 0;
+  while (i < FASES.length-2 && p > FASES[i+1].p) i++;
+  const t = (p - FASES[i].p) / (FASES[i+1].p - FASES[i].p);
+  return t < 0.5 ? FASES[i].nombre : FASES[i+1].nombre;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -2155,6 +2257,7 @@ function loop(now){
   }
   let dt=(now-last)/1000; last=now;
   Perf.muestra(now, dt*1000);
+  aplicarCielo(progresoCielo());
   if (dt>0.1) dt=0.1;
 
   if (G.mode==="play"){
@@ -2891,6 +2994,7 @@ if (location.hash.replace(/^#/,"").split(/[&,;]/).includes("lab")) abrirLab();
 // corrección de posición al aterrizar y comprobar que no hay tirón.
 if (/\bdebug\b/.test(location.hash)){
   window.__T = { G, CAPS, AV, W, play, respawn, Net, Perf, buildMeshes,
+                 FASES, aplicarCielo, progresoCielo, faseActual,
                  regenerate, buildTower, indexarTorre, doJump, JumpMath, MURO_ALTO,
                  colocarSendero, colocarCornisa, colocarTrampolines, DIFS,
                  TRAMPOLIN_ALTO, TRAMPOLIN_V,

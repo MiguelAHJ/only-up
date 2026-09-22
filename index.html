@@ -420,7 +420,20 @@ const AV = {
 };
 const BASE_GRAVITY = 9.81;
 const MARGEN = 0.90;          // margenSeguridad del generador
-const HX = 0.35, HY = 0.85, HZ = 0.35;
+/* Las semiextensiones de la caja del jugador. NO es un cilindro ni una
+   cápsula: es una caja de 0,70 × 1,70 × 0,70 y el motor la resuelve con
+   resolverCaja, igual que a cualquier plataforma.
+
+   Son `let` y no `const` sólo para que el LABORATORIO pueda estirarlas en
+   vivo y ver dónde sobra y dónde falta. El juego de verdad nunca las toca:
+   al salir del lab se restauran desde CAJA_0. Cambiarlas de verdad no es
+   gratis — los pasillos del generador se dimensionaron contando con 2×HX
+   (ver el comentario del sendero), así que un cambio real obliga a volver a
+   verificar las torres. Lo que sí NO depende de esto es JumpMath: sus
+   cuentas sólo usan velocidad y gravedad, así que tocar la caja aquí no
+   descuadra la generación. */
+let HX = 0.35, HY = 0.85, HZ = 0.35;
+const CAJA_0 = { hx:0.35, hy:0.85, hz:0.35 };
 
 /* ═══════════════════════════════════════════════════════════════
    2 · JumpMath — port literal de JumpMath.cs
@@ -2274,6 +2287,7 @@ function loop(now){
     }
     W.player.position.set(G.px, G.py-HY, G.pz);
     if (Math.hypot(G.vx,G.vz)>0.6) W.player.rotation.y=Math.atan2(G.vx,G.vz);
+    if (PERSONA.activo) actualizarPersona(dt);
     updateShadow();
     Net.tick(now);
     hud();
@@ -2408,6 +2422,279 @@ const PROPS = {
                     {c:[-0.263, 0.2425, -0.212], t:[0.07, 0.485, 0.07]},
                     {c:[ 0.263, 0.2425, -0.212], t:[0.07, 0.485, 0.07]} ] }
 };
+
+/* ═══════════════════════════════════════════════════════════════
+   EL PERSONAJE DEL LABORATORIO
+   RobotExpressive, de Tomás Laulhé (Quaternius), CC0 1.0. Está en
+   modelos/robot/ con su LICENCIA.md. Se eligió por tres razones medibles:
+   pesa 453 KB (la silla pesa 2,4 MB), trae 3.237 triángulos y 43 huesos, y
+   es el ÚNICO candidato con clips de salto — Soldier y Xbot, los otros dos
+   que miré, no tienen ninguno, y además vienen de Mixamo sin archivo de
+   licencia, que en un repositorio público no es un detalle.
+
+   Lo que se está probando aquí NO es el robot: es la maquinaria (máquina de
+   estados, mezclas, velocidad de los pies, la caja). Cambiar de modelo
+   después es cambiar una ruta y cinco nombres de clip.
+
+   Números medidos con el modelo delante, no a ojo:
+   · mide 4,461 m en su escala nativa → ×0,3811 para dejarlo en 1,70
+   · a esa escala, su clip de andar avanza 1,51 m/s y el de correr 2,41 m/s
+   · mira hacia +Z, que es justo lo que espera atan2(vx,vz) del juego
+   · no trae ni una textura: 7 materiales de color plano. Por eso NO le pasa
+     lo del bidón, que salía negro porque el juego renderiza en lineal.
+   ═══════════════════════════════════════════════════════════════ */
+const PERS_ALTO = 1.70;                       // se planta a la altura de la caja original
+const VEL_CLIP  = { andar: 1.51, correr: 2.41 };
+
+/* Talla del robot en cada pose, ya escalado a 1,70 (ancho × alto × fondo).
+   Sirve para el rótulo del lab: poder comparar de un vistazo la caja que
+   tienes puesta con lo que el personaje ocupa de verdad en ese momento.
+   Ojo al dato incómodo: corriendo ocupa 1,70 m de fondo y la caja mide
+   0,70. Ninguna figura convexa cubre a un humanoide corriendo; por eso
+   todos los juegos ponen una cápsula y se comen que los pies asomen. */
+const TALLA = {
+  quieto: [1.18, 1.71, 1.07],
+  andar:  [1.22, 1.77, 1.17],
+  correr: [1.18, 1.96, 1.70],
+  salto:  [1.53, 2.30, 1.43],
+  doble:  [1.19, 2.00, 1.68],
+  caer:   [1.53, 2.30, 1.43],
+};
+
+const PERSONA = {
+  ruta: "modelos/robot/RobotExpressive.glb",
+  raiz: null, mixer: null, acc: {}, caja: null,
+  activo: false, intentado: false, fallo: "",
+  estado: "quieto", giro: 0,
+};
+
+function cargarPersona(cb){
+  if (PERSONA.raiz || PERSONA.intentado) return cb();
+  PERSONA.intentado = true;
+  if (typeof THREE.GLTFLoader !== "function"){ PERSONA.fallo = "sin cargador glTF"; return cb(); }
+  new THREE.GLTFLoader().load(PERSONA.ruta, (g) => {
+    const m = g.scene;
+    /* El robot no tiene mapas, pero sí colores. glTF guarda baseColorFactor
+       en lineal y three lo copia tal cual a material.color; como este juego
+       escribe el framebuffer sin corregir, ese valor lineal se muestra como
+       si fuera sRGB y el robot sale apagado. convertLinearToSRGB() deja el
+       número que hay que escribir para que se VEA el color correcto. Es el
+       mismo problema del bidón por otra puerta. */
+    m.traverse(o => {
+      if (!o.isMesh) return;
+      o.frustumCulled = false;            // sus huesos lo sacan de su caja original
+      for (const mat of (Array.isArray(o.material) ? o.material : [o.material])){
+        if (!mat || mat.__yaVa) continue;
+        if (mat.color) mat.color.convertLinearToSRGB();
+        mat.__yaVa = true; mat.needsUpdate = true;
+      }
+    });
+
+    const mx = new THREE.AnimationMixer(m);
+    PERSONA.mixer = mx;
+    const clip = (n) => g.animations.find(a => a.name === n);
+
+    /* Se mide la altura DEFORMADA (pasando los vértices por sus huesos).
+       Box3.setFromObject() no vale con mallas con esqueleto: mide la pose
+       de enlace por la matriz del nodo y, con modelos exportados en
+       centímetros, aplica la escala dos veces. Midiendo así me dijo una vez
+       que un personaje de 1,80 m medía 1,8 CENTÍMETROS.
+
+       Y no se mide la pose de enlace, se mide QUIETO: la pose de enlace es
+       una postura de taller que nadie ve. Escalando por ella, el robot
+       parado quedaba en 1,64 m dentro de una caja de 1,70 y flotaba 6 cm de
+       aire sobre la cabeza. Se toma el instante MÁS ALTO de todo el ciclo
+       de Idle, así que parado no sobresale nunca por arriba. */
+    const cajaDeformada = () => {
+      m.updateMatrixWorld(true);
+      const bb = new THREE.Box3(), v = new THREE.Vector3();
+      m.traverse(o => {
+        if (!o.isMesh || !o.visible) return;
+        const pos = o.geometry.attributes.position;
+        for (let i = 0; i < pos.count; i++){
+          if (o.isSkinnedMesh && o.skeleton) o.boneTransform(i, v);
+          else v.fromBufferAttribute(pos, i);
+          v.applyMatrix4(o.matrixWorld); bb.expandByPoint(v);
+        }
+      });
+      return bb;
+    };
+
+    const quieto = clip("Idle");
+    let bb = null;
+    if (quieto){
+      const a0 = mx.clipAction(quieto); a0.play();
+      for (let i = 0; i <= 12; i++){
+        mx.setTime(quieto.duration * i / 12);
+        const b2 = cajaDeformada();
+        bb = bb ? bb.union(b2) : b2;
+      }
+      mx.stopAllAction(); mx.setTime(0);
+    } else bb = cajaDeformada();
+
+    const alto = Math.max(1e-6, bb.getSize(new THREE.Vector3()).y);
+    const k = PERS_ALTO / alto;
+    const c = bb.getCenter(new THREE.Vector3());
+    m.scale.multiplyScalar(k);
+    m.position.set(-c.x * k, -bb.min.y * k, -c.z * k);   // pies en y=0, centrado en x,z
+
+    const cont = new THREE.Group();
+    cont.add(m);
+    cont.visible = false;
+    W.scene.add(cont);
+    PERSONA.raiz = cont;
+    const bucle = (n) => { const c2 = clip(n); if (!c2) return null;
+      const a = mx.clipAction(c2); a.play(); a.setEffectiveWeight(0); return a; };
+    const unaVez = (n, t) => { const c2 = clip(n); if (!c2) return null;
+      const a = mx.clipAction(c2); a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true;
+      a.play(); a.setEffectiveWeight(0); if (t !== undefined){ a.paused = true; a.time = c2.duration * t; }
+      return a; };
+
+    /* No hay clip de "cayendo", así que se usa el de salto congelado al 58 %,
+       que es donde el robot lleva las piernas recogidas en el aire.
+
+       OJO, y esto me costó una prueba en rojo: mixer.clipAction(clip)
+       devuelve LA MISMA acción para el mismo clip. Pedirle dos veces el
+       clip "Jump" no da dos animaciones independientes, da un único objeto,
+       y entonces "saltando" y "cayendo" se peleaban por su peso y ninguno
+       llegaba a 1 (se quedaban a 0,47 cada uno). Hay que clonar el clip
+       para que sea otro clip y, con él, otra acción. */
+    const caerClip = clip("Jump") ? clip("Jump").clone() : null;
+    if (caerClip) caerClip.name = "Cayendo";
+    const accionCaer = caerClip
+      ? (() => { const a = mx.clipAction(caerClip);
+                 a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true;
+                 a.play(); a.setEffectiveWeight(0);
+                 a.paused = true; a.time = caerClip.duration * 0.58; return a; })()
+      : null;
+
+    /* quieto/andar/correr son continuos y se MEZCLAN por velocidad: con el
+       joystick analógico del móvil la velocidad es un número, no un
+       interruptor, y la animación puede seguirlo. Los de aire son disparos. */
+    PERSONA.acc = {
+      quieto: bucle("Idle"),
+      andar:  bucle("Walking"),
+      correr: bucle("Running"),
+      salto:  unaVez("Jump"),
+      doble:  unaVez("WalkJump"),
+      caer:   accionCaer,
+    };
+    if (!PERSONA.acc.quieto || !PERSONA.acc.correr) PERSONA.fallo = "faltan clips";
+    cb();
+  }, undefined, (e) => {
+    console.error("[lab] no cargó el personaje:", e);
+    PERSONA.fallo = "no cargó modelos/robot/ · ¿está en la imagen?";
+    cb();
+  });
+}
+
+/* La caja de colisión dibujada alrededor del jugador. Se rehace cuando
+   cambian sus medidas, que en el lab pasa cada vez que tocas una tecla. */
+function rehacerCajaPersona(){
+  if (PERSONA.caja){ W.scene.remove(PERSONA.caja);
+    PERSONA.caja.geometry.dispose(); PERSONA.caja = null; }
+  const l = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(HX*2, HY*2, HZ*2)),
+    new THREE.LineBasicMaterial({ color:0x4FD1C5, depthTest:false }));
+  l.renderOrder = 998;
+  l.visible = !!(G.lab && LAB.verAlambres);
+  PERSONA.caja = l;
+  W.scene.add(l);
+}
+
+/* Qué animación toca. Sale ENTERA del estado que el juego ya lleva: no hace
+   falta inventar nada ni guardar banderas nuevas. */
+function estadoPersona(){
+  const v = Math.hypot(G.vx, G.vz);
+  if (!G.grounded){
+    if (G.vy > 0.6) return G.jumpsLeft <= 0 ? "doble" : "salto";
+    return "caer";
+  }
+  if (v < 0.25) return "quieto";
+  return "sueloMezcla";
+}
+
+function actualizarPersona(dt){
+  if (!PERSONA.raiz || !PERSONA.mixer) return;
+  const A = PERSONA.acc;
+  const v = Math.hypot(G.vx, G.vz);
+  const nuevo = estadoPersona();
+
+  if (nuevo === "sueloMezcla"){
+    /* Mezcla continua quieto → andar → correr según la velocidad real.
+       Sin esto, pasar de andar a correr es un salto de fotograma que se ve
+       como un tirón; con el stick analógico se notaría todo el rato. */
+    const wa = AV.walkSpeed, wr = AV.runSpeed;
+    let pQuieto = 0, pAndar = 0, pCorrer = 0;
+    if (v <= wa){ const t = clamp(v / Math.max(0.001, wa), 0, 1); pQuieto = 1 - t; pAndar = t; }
+    else { const t = clamp((v - wa) / Math.max(0.001, wr - wa), 0, 1); pAndar = 1 - t; pCorrer = t; }
+    peso(A.quieto, pQuieto, dt); peso(A.andar, pAndar, dt); peso(A.correr, pCorrer, dt);
+    peso(A.salto, 0, dt); peso(A.doble, 0, dt); peso(A.caer, 0, dt);
+    /* Contra el patinaje: el clip se acelera para que sus pies avancen a la
+       velocidad a la que el juego mueve el cuerpo. */
+    if (A.andar)  A.andar.timeScale  = clamp(v / VEL_CLIP.andar,  0.35, 4);
+    if (A.correr) A.correr.timeScale = clamp(v / VEL_CLIP.correr, 0.35, 4);
+    PERSONA.estado = v < 0.25 ? "quieto" : (v < (AV.walkSpeed+AV.runSpeed)/2 ? "andar" : "correr");
+  } else {
+    for (const k of ["quieto","andar","correr","salto","doble","caer"])
+      peso(A[k], k === nuevo ? 1 : 0, dt);
+    if (nuevo !== PERSONA.estado && (nuevo === "salto" || nuevo === "doble") && A[nuevo]){
+      A[nuevo].reset(); A[nuevo].play();       // el disparo se rearma cada vez
+    }
+    PERSONA.estado = nuevo;
+  }
+
+  PERSONA.mixer.update(dt);
+
+  /* El rótulo se repinta SÓLO cuando cambia el estado. Hacerlo cada
+     fotograma sería reescribir el HTML 60 veces por segundo para que casi
+     siempre ponga lo mismo. */
+  if (PERSONA.estado !== PERSONA._pintado){ PERSONA._pintado = PERSONA.estado; pintarLab(); }
+
+  PERSONA.raiz.position.set(G.px, G.py - HY, G.pz);
+  /* El robot mira a +Z, que es exactamente lo que produce atan2(vx,vz).
+     Se gira suave: con un muñeco cilíndrico el giro instantáneo daba igual,
+     con un personaje se ve como un tirón.
+     0,10 s de constante: una media vuelta completa tarda unos 10 fotogramas
+     (~0,17 s). Con 0,06 tardaba 4 y a ojo seguía siendo un latigazo; subir
+     mucho más empieza a sentirse blando en un juego de saltos finos. */
+  if (v > 0.6){
+    const obj = Math.atan2(G.vx, G.vz);
+    let d = obj - PERSONA.giro;
+    while (d >  Math.PI) d -= 2*Math.PI;
+    while (d < -Math.PI) d += 2*Math.PI;
+    PERSONA.giro += d * (1 - Math.exp(-dt / 0.10));
+  }
+  PERSONA.raiz.rotation.y = PERSONA.giro;
+
+  if (PERSONA.caja) PERSONA.caja.position.set(G.px, G.py, G.pz);
+}
+
+/* Pesos con transición: nunca se salta de 0 a 1 de golpe. 0,12 s es lo que
+   tarda en fundirse; por debajo se nota el corte, por encima se ve blando. */
+function peso(acc, destino, dt){
+  if (!acc) return;
+  const w = acc.getEffectiveWeight();
+  acc.setEffectiveWeight(w + (destino - w) * (1 - Math.exp(-dt / 0.12)));
+}
+
+/* Cambia la caja del jugador sin que se hunda: al bajar el techo o el suelo
+   de la caja, se mueve el centro para que los PIES se queden donde están. */
+function ajustarCaja(dx, dy, dz){
+  const hy0 = HY;
+  HX = clamp(+(HX + dx).toFixed(3), 0.10, 1.20);
+  HZ = clamp(+(HZ + dz).toFixed(3), 0.10, 1.20);
+  HY = clamp(+(HY + dy).toFixed(3), 0.25, 1.60);
+  G.py += (HY - hy0);                 // los pies no se mueven
+  rehacerCajaPersona();
+  pintarLab();
+}
+function restaurarCaja(){
+  const hy0 = HY;
+  HX = CAJA_0.hx; HY = CAJA_0.hy; HZ = CAJA_0.hz;
+  G.py += (HY - hy0);
+  rehacerCajaPersona();
+}
 
 function cargarProps(cb){
   const nombres = Object.keys(PROPS).filter(n => !LAB.modelos[n]);
@@ -2655,7 +2942,38 @@ function pintarLab(){
     n(8) + '<span class="bien">asiento + respaldo + 4 patas</span> &nbsp; ' +
     n(9) + 'salto de asiento a asiento<br>' +
     tecla + ' alambres de colisión: <b>' + (LAB.verAlambres ? "sí" : "no") + '</b>' +
-    ' &nbsp;·&nbsp; <span class="tec">Ctrl+Alt+B</span> salir';
+    ' &nbsp;·&nbsp; <span class="tec">Ctrl+Alt+B</span> salir' +
+    filaPersona();
+}
+
+/* La fila del personaje. Lo importante no son las teclas: es el renglón que
+   compara, en el mismo sitio y en los mismos metros, la caja que tienes
+   puesta con lo que el personaje ocupa AHORA MISMO. Con eso a la vista
+   discutir si la caja está bien deja de ser una opinión. */
+function filaPersona(){
+  if (PERSONA.fallo)
+    return '<br><span class="mal">· personaje: ' + PERSONA.fallo + ' ·</span>';
+  if (!PERSONA.raiz) return "";
+  const t = TALLA[PERSONA.estado] || TALLA.quieto;
+  const cmp = (real, caja) => {
+    const d = real - caja;
+    const cls = Math.abs(d) < 0.06 ? "bien" : "mal";
+    return '<span class="' + cls + '">' + real.toFixed(2) + '</span>';
+  };
+  const nombres = { quieto:"quieto", andar:"andando", correr:"corriendo",
+                    salto:"saltando", doble:"doble salto", caer:"cayendo" };
+  return '<br><b>PERSONAJE</b> ' +
+    '<span class="tec">P</span> ' + (PERSONA.activo ? "robot" : "cilindro") +
+    ' &nbsp;·&nbsp; ahora: <b>' + (nombres[PERSONA.estado] || PERSONA.estado) + '</b>' +
+    (PERSONA.activo
+      ? ' &nbsp;·&nbsp; él ocupa ' + cmp(t[0]) + ' × ' + cmp(t[1]) + ' × ' + cmp(t[2]) +
+        ' &nbsp;·&nbsp; la caja mide <b>' + (HX*2).toFixed(2) + ' × ' + (HY*2).toFixed(2) +
+        ' × ' + (HZ*2).toFixed(2) + '</b> m<br>' +
+        'caja: <span class="tec">Z</span><span class="tec">X</span> ancho &nbsp; ' +
+        '<span class="tec">C</span><span class="tec">V</span> fondo &nbsp; ' +
+        '<span class="tec">F</span><span class="tec">G</span> alto &nbsp; ' +
+        '<span class="tec">T</span> volver a 0,70 × 1,70 × 0,70'
+      : '');
 }
 
 function abrirLab(){
@@ -2665,18 +2983,33 @@ function abrirLab(){
   $("menu").hidden = true; $("pause").hidden = true; $("win").hidden = true;
   $("labinfo").hidden = false;
   $("sala").hidden = true;
-  cargarProps(() => {
+  cargarProps(() => cargarPersona(() => {
     montarLab();
+    /* El muñeco de siempre se aparta y entra el personaje. Sólo aquí: en el
+       juego de verdad sigue el cilindro hasta que se decida lo contrario. */
+    PERSONA.activo = !!(PERSONA.raiz && !PERSONA.fallo);
+    if (PERSONA.raiz) PERSONA.raiz.visible = PERSONA.activo;
+    if (W.player) W.player.visible = !PERSONA.activo;
+    rehacerCajaPersona();
     G.mode="play"; G.elapsed=0; G.best=0; G.worst=0; G.won=false;
     $("hud").classList.add("on");
     lock();
-  });
+  }));
 }
 
 function limpiarLab(){
   G.lab = false;
   if (LAB.grupo)    { W.scene.remove(LAB.grupo);    LAB.grupo = null; }
   if (LAB.alambres) { W.scene.remove(LAB.alambres); LAB.alambres = null; }
+  /* Se deshace TODO lo del personaje. Si la caja se quedara estirada al
+     volver al juego, las torres se jugarían con un jugador de otro tamaño
+     y el fallo aparecería lejísimos de aquí. */
+  PERSONA.activo = false;
+  if (PERSONA.raiz) PERSONA.raiz.visible = false;
+  if (PERSONA.caja){ W.scene.remove(PERSONA.caja);
+    PERSONA.caja.geometry.dispose(); PERSONA.caja = null; }
+  if (W.player) W.player.visible = true;
+  restaurarCaja();
   $("labinfo").hidden = true;
   regenerate();                       // devuelve la torre de verdad
 }
@@ -2685,6 +3018,7 @@ function salirLab(){ if (G.lab){ limpiarLab(); toMenu(); } }
 function alternarAlambres(){
   LAB.verAlambres = !LAB.verAlambres;
   if (LAB.alambres) LAB.alambres.visible = LAB.verAlambres;
+  if (PERSONA.caja) PERSONA.caja.visible = LAB.verAlambres;
   pintarLab();
 }
 $("labinfo").addEventListener("click", alternarAlambres);
@@ -2808,6 +3142,29 @@ addEventListener("keydown",e=>{
     e.preventDefault(); G.lab ? salirLab() : abrirLab(); return;
   }
   if (G.lab && e.code==="KeyK" && !G.keys["KeyK"]){ alternarAlambres(); }
+  /* Teclas de la caja. Van ANTES del guardia de repetición a propósito: al
+     dejar la tecla pulsada el navegador repite el keydown y la caja crece
+     sola, que es como se ajusta a ojo sin machacar el dedo. Paso de 1 cm,
+     que es la precisión que nos importa (medimos que 2 cm de escalón te
+     paran en seco). */
+  if (G.lab && PERSONA.activo && !e.ctrlKey && !e.altKey && !e.metaKey){
+    const P = 0.01;
+    switch (e.code){
+      case "KeyZ": ajustarCaja(-P,0,0); return;
+      case "KeyX": ajustarCaja(+P,0,0); return;
+      case "KeyC": ajustarCaja(0,0,-P); return;
+      case "KeyV": ajustarCaja(0,0,+P); return;
+      case "KeyF": ajustarCaja(0,-P,0); return;
+      case "KeyG": ajustarCaja(0,+P,0); return;
+      case "KeyT": restaurarCaja(); pintarLab(); return;
+    }
+  }
+  if (G.lab && e.code==="KeyP" && !G.keys["KeyP"] && PERSONA.raiz && !PERSONA.fallo){
+    PERSONA.activo = !PERSONA.activo;
+    PERSONA.raiz.visible = PERSONA.activo;
+    W.player.visible = !PERSONA.activo;
+    pintarLab();
+  }
   if (e.code==="Space" && G.mode==="play") e.preventDefault();
   if (G.keys[e.code]) return;
   G.keys[e.code]=true;
@@ -3002,6 +3359,9 @@ if (/\bdebug\b/.test(location.hash)){
                  informe:()=>G.tower.informe,
                  remotosCount:()=>remotos.size,
                  abrirLab, salirLab, LAB, alternarAlambres,
+                 PERSONA, TALLA, VEL_CLIP, actualizarPersona, estadoPersona,
+                 ajustarCaja, restaurarCaja, CAJA_0,
+                 caja:()=>({hx:HX,hy:HY,hz:HZ}),
                  physicsStep, resolveCollisions, updateShadow, hitsSolid,
                  CELDA, cubos:()=>G.tower.idx.size };
 }

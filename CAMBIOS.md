@@ -1,3 +1,217 @@
+# Cambios — 22 de septiembre de 2026 (decimoséptimo lote): un personaje de verdad en el laboratorio
+
+El muñeco del juego es un cilindro con una esfera encima y se desliza sin
+mover una pierna. En el laboratorio ahora hay un personaje con esqueleto que
+anda, corre, salta, hace el doble salto y cae, con su caja de colisión
+dibujada encima y estirable en vivo. **El juego de verdad no ha cambiado**:
+fuera del lab sigue el cilindro de siempre.
+
+## Qué modelo, y por qué ese
+
+Se midieron tres candidatos **con el mismo three.js que usa el juego (r128)**,
+escalados todos a 1,70 m:
+
+| | Robot | Soldier | Xbot |
+|---|---|---|---|
+| peso | **453 KB** | 2.110 KB | 2.861 KB |
+| triángulos | **3.237** | 11.376 | 49.112 |
+| huesos | 43 | 49 | 67 |
+| licencia | **CC0 1.0**, con autor escrito | Mixamo, sin archivo | Mixamo, sin archivo |
+| clips | Idle · Walking · Running · **Jump** · **WalkJump** (14) | Idle · Walk · Run | idle · walk · run |
+| ancho quieto | 1,18 m | 0,75 m | 0,58 m |
+| fondo corriendo | 1,70 m | 1,30 m | 1,16 m |
+
+Gana **RobotExpressive**, de Tomás Laulhé (Quaternius), con retoques de Don
+McCurdy — el mismo que escribió el `GLTFLoader` de three.js. Tres motivos, y
+ninguno es estético:
+
+1. **CC0 1.0 con README que nombra al autor.** Los otros dos vienen de Mixamo
+   y no traen archivo de licencia. Este repositorio es público.
+2. **Es el único con clips de salto.** A Soldier y a Xbot habría que buscarles
+   uno aparte en Mixamo y pasarlo por Blender. Aquí vienen dos: `Jump` y
+   `WalkJump`, que van justo a salto y doble salto.
+3. **453 KB.** La silla pesa 2,4 MB.
+
+Lo que se está probando no es el robot: es la maquinaria. Cambiar de modelo
+después es cambiar una ruta y cinco nombres de clip.
+
+## El dato incómodo: ninguna figura encaja con alguien corriendo
+
+Mira la última fila de la tabla. Quieto, un humanoide ocupa 0,58–0,75 m.
+**Corriendo, las piernas se abren a 1,16–1,30 m de punta a punta** — y el
+robot, que es rechoncho, a 1,70. La caja del jugador mide 0,70.
+
+Da igual qué forma se elija —caja, cilindro o cápsula—: al correr, los pies
+asoman por el borde de la plataforma. No es un defecto de este motor. Por eso
+todos los juegos ponen una cápsula lisa debajo y se comen la diferencia.
+
+Lo que sí se puede hacer, y es lo que hay ahora en el lab, es **verlo y
+medirlo** en vez de discutirlo.
+
+## Cómo se escaló, y un número que estuvo mal
+
+El robot mide 4,50 m en su escala nativa. Se escala ×0,378 para que **parado**
+mida 1,70, exactamente el alto de la caja.
+
+Y "parado" es literal, no la pose de enlace. La pose de enlace es una postura
+de taller que no se ve nunca; escalando por ella el robot quedaba en 1,63 m
+dentro de una caja de 1,70 y le sobraban 7 cm de aire sobre la cabeza. Se
+recorre el ciclo de `Idle` entero y se escala por el instante más alto, así
+que parado no sobresale jamás por arriba (medido: de 1,672 a 1,699 m).
+
+Para medir un personaje con esqueleto **no vale `Box3.setFromObject()`**: mide
+la geometría en su pose de enlace por la matriz del nodo y, con modelos
+exportados en centímetros, aplica la escala dos veces. Midiendo así me dijo
+que Xbot, que mide 1,80 m, medía **1,8 centímetros**. Hay que pasar cada
+vértice por sus huesos con `boneTransform()`, que es lo que hace la tarjeta
+gráfica al dibujar.
+
+## La máquina de estados
+
+Sale entera del estado que el juego ya llevaba. No hizo falta inventar ni una
+bandera: `G.grounded`, `G.vy`, `hypot(G.vx,G.vz)` y `G.jumpsLeft` bastan.
+
+- en suelo → mezcla **continua** quieto → andar → correr según la velocidad
+- subiendo con un salto en la reserva → `Jump`
+- subiendo sin saltos → `WalkJump` (el doble)
+- bajando → `Jump` congelado al 58 %, que es donde lleva las piernas recogidas
+
+La mezcla continua importa más de lo que parece: **el joystick del móvil es
+analógico**, así que la velocidad es un número y no un interruptor, y la
+animación puede seguirlo. A media velocidad suenan las dos a la vez, medido
+0,5 y 0,5.
+
+### Contra el patinaje de pies
+
+El clip de andar del robot avanza **1,51 m/s** y el de correr **2,41 m/s** a
+escala 1,70. El juego anda a 3,2 y corre a 6,4. Si se reproducen tal cual, los
+pies resbalan como sobre hielo.
+
+Se mide la velocidad del clip en serio: durante el apoyo, el pie está quieto
+en el suelo, así que **retrocede respecto al cuerpo justo a la velocidad de
+avance**. Esa es la velocidad del clip. Con ella, el clip se acelera ×2,12 al
+andar y ×2,66 al correr.
+
+Sale acelerado, sí. 6,4 m/s son 23 km/h y este robot tiene las piernas cortas.
+Patinar se ve peor.
+
+## La caja, estirable en vivo
+
+Con el personaje delante y el alambre encima, en el laboratorio:
+
+| tecla | qué hace |
+|---|---|
+| `Z` `X` | ancho − / + |
+| `C` `V` | fondo − / + |
+| `F` `G` | alto − / + |
+| `T` | volver a 0,70 × 1,70 × 0,70 |
+| `P` | cambiar entre robot y cilindro |
+| `K` | alambres sí / no |
+
+Paso de 1 cm, que es la precisión que importa aquí (medimos en su día que un
+escalón de 2 cm te para en seco). Dejando la tecla pulsada, crece sola.
+
+Dos cuidados que no se ven pero están:
+
+- **Subir el alto no te hunde.** La caja se mide desde el centro, así que
+  subir el techo baja también el suelo y el jugador se metería medio cuerpo en
+  la plataforma. Se compensa moviendo el centro; comprobado que los pies no se
+  mueven ni un milímetro.
+- **Al salir del lab se restaura todo.** Si la caja se quedara estirada, las
+  torres de verdad se jugarían con un jugador de otro tamaño y el fallo
+  aparecería lejísimos de aquí. Hay una prueba que la deja descuadrada a
+  propósito antes de salir.
+
+`HX`/`HY`/`HZ` pasaron de `const` a `let` sólo por esto. Conviene saber que
+`JumpMath` **no** las usa —sus cuentas sólo tienen velocidad y gravedad—, así
+que tocar la caja no descuadra la generación de la torre. Lo que sí contó con
+ellas fue el ancho de los pasillos del generador, así que cambiarlas de verdad
+obligaría a volver a verificar las torres.
+
+## Lo que cuesta
+
+| | |
+|---|---|
+| llamadas de dibujo | **+19 por personaje** |
+| triángulos | +3.237 |
+| animar y mezclar | 0,043 ms por fotograma |
+
+El número feo es el primero, y merece explicación: el robot son **19 mallas
+separadas** con 7 materiales. Una malla con esqueleto **no se puede instanciar**
+con el truco que usa la torre, así que cada personaje va por su cuenta. Con 16
+jugadores serían +304 llamadas, y la torre entera, después de instanciarla, se
+dibuja en 10–18. Fusionar esas 19 mallas por material (en Blender, o al
+cargar) bajaría a ~7 por personaje. Queda anotado para cuando esto salga del
+laboratorio.
+
+La CPU no preocupa: 0,68 ms para 16 personajes, sobre un presupuesto de 16 ms.
+
+## Errores propios de este lote
+
+**Una acción para dos estados.** `mixer.clipAction(clip)` devuelve **la misma**
+acción para el mismo clip. Pedí `Jump` dos veces —una para saltar y otra
+congelada para caer— y me devolvió un único objeto: los dos estados se
+peleaban por su peso y ninguno pasaba de 0,47. Hay que clonar el clip.
+
+**Medí la pose de enlace creyendo que medía al personaje.** La prueba de
+altura adelantaba el reloj del mezclador pero no movía la máquina de estados,
+y con todas las acciones a peso 0 lo que se mide es la postura de taller. Daba
+1,63 y pensé que el escalado estaba mal; estaba bien y daba 1,70.
+
+**Probé la función equivocada.** Para comprobar que la caja manda en la
+física usé `hitsSolid()`. Recibe un OBJETO `{x,y,z}` y no tres números, y
+además usa un margen fijo de 0,30 que no tiene nada que ver con el jugador:
+es un detector de proximidad, no la física. La física es `resolverCaja`. Y
+como mi barrido no encontraba nada en ninguno de los dos casos, la prueba
+"pasaba" sin comprobar absolutamente nada.
+
+**Una prueba inestable.** La de los pies daba 0,000 en una pasada y 0,088 en
+la siguiente, y el margen que le había puesto tapaba la diferencia: el punto
+de aparición del lab está fuera de la losa y el jugador entra cayendo. Ahora
+se le planta encima y se espera a que el motor diga que toca suelo. El margen
+bajó de 5 cm a 1,2 cm.
+
+## Cómo se ha comprobado
+
+`test/personaje.js`: 36 comprobaciones contra el juego en marcha — carga,
+talla, apoyo, los seis estados, la mezcla, la aceleración de los pies, las
+cuatro orientaciones, el giro suave, las seis teclas, y que al salir todo
+vuelve a su sitio. Tres pasadas seguidas en verde.
+
+Y como una prueba que nunca has visto fallar no sirve de nada, se rompió el
+juego a propósito cinco veces:
+
+| lo que se rompió | fallos |
+|---|---|
+| no restaurar la caja al salir del lab | 1 |
+| quitar la aceleración de los clips | 2 |
+| volver al error de la acción compartida | 2 |
+| girar de golpe | 1 |
+| no compensar el centro al cambiar el alto | 1 |
+
+`test/despliegue.js` ya cubre el modelo nuevo solo: lo encuentra en
+`index.html` y comprueba que el `Dockerfile` lo mete en la imagen.
+
+## Lo que NO se ha hecho
+
+- **El juego de verdad sigue con el cilindro.** A propósito.
+- **Los amigos también.** Los avatares remotos siguen siendo cilindros.
+- **Del amigo sólo llegan `x, y, z, ry` a 15 Hz.** Para animarlo hay que
+  deducir su velocidad y su contacto con el suelo del propio chorro de
+  posiciones, o añadir un byte de estado al protocolo. Lo segundo es más
+  barato de depurar que una heurística que falla sólo a veces.
+- **Sin IK.** El pie no se apoya en la piedra inclinada, la atraviesa.
+
+## Archivos tocados
+
+- `index.html` — el personaje, la máquina de estados, la caja ajustable
+- `modelos/robot/RobotExpressive.glb` (453 KB) y su `LICENCIA.md`
+
+`server.js` y `Dockerfile` no se tocan: `.glb` ya estaba en la lista blanca
+del servidor y `COPY modelos ./modelos` ya lo arrastra.
+
+---
+
 # Cambios — 22 de septiembre de 2026 (decimosexto lote): panel privado
 
 Un panel solo para ti: quién está jugando ahora mismo, en qué sala, con qué

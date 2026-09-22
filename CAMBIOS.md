@@ -1,3 +1,244 @@
+# Cambios — 22 de septiembre de 2026 (decimocuarto lote): la minitorre
+
+Un nivel pequeño de verdad dentro del laboratorio, **~11 m y 10 estaciones
+en espiral**, construido solo con el bidón y la silla. Se entra igual
+(`Ctrl+Alt+B` o `#lab`) y ahora arrancas a su pie; el banco de pruebas
+sigue existiendo, al este.
+
+## El giro es lo que cambia el salto
+
+`resolverCaja` solo sabe girar por **yaw**, así que nada se puede tumbar en
+diagonal. Pero orientar sí cambia por completo cómo se salta encima:
+
+| estación | qué obliga a hacer |
+|---|---|
+| bidón de pie | peana redonda de 0,56 — el caso fácil |
+| bidón tumbado, tangente | una viga de 24 cm a lo largo del camino |
+| bidón tumbado, radial | la misma viga **atravesada**: caes de lado |
+| silla de frente | aterrizas en el asiento, el respaldo te frena |
+| silla de lado | el respaldo pasa a ser muro lateral |
+| silla escalón | asiento 0,585 → respaldo 1,264, dos alturas seguidas |
+
+**Los props flotan: no hay peana debajo de ninguno.** Lo único sólido de
+cada estación son las cajas del propio objeto, así que el apoyo es el
+objeto y nada más.
+
+La primera versión sí llevaba una peana de 0,78 m bajo cada prop. Fuera. Y
+al quitarlas, la verificación dio **exactamente los mismos márgenes** —
+entre 16% y 42%, tramo por tramo, sin mover un dígito. O sea que las peanas
+nunca estaban sosteniendo a nadie: el apoyo real siempre había sido el
+objeto. Solo estorbaban a la vista.
+
+## Un sitio donde los signos se cuelan seguro
+
+Girar un prop no es girar su malla: hay que girar también el offset de cada
+caja de colisión alrededor del origen del prop. El motor define el giro
+así — una caja con yaw tiene su eje local +z apuntando a (sen yaw, cos yaw)
+— y de ahí sale que un desplazamiento local (lx, lz) cae en el mundo en
+
+```
+  dx =  lx·cos + lz·sen        dz = −lx·sen + lz·cos
+```
+
+Eso está escrito **una sola vez**, en `deProp`, y todo lo demás lo usa. Es
+justo la clase de fórmula que, repetida en cinco sitios, acaba con un signo
+cambiado en uno de ellos.
+
+## Verificado subiéndola, no mirándola
+
+`minitorre.js` recorre la ruta tramo a tramo con la física real:
+
+```
+  OK  bidón de pie → bidón tumbado      2,77 m  +0,93 m   49/135 (36%)
+  OK  bidón tumbado → silla, asiento    2,47 m  +1,27 m   47/135 (35%)
+  OK  silla, asiento → bidón de pie     2,95 m  +1,54 m   22/135 (16%)
+  ...
+  OK  bidón tumbado → meta              2,77 m  +0,69 m   57/135 (42%)
+
+  la minitorre se sube entera
+```
+
+Entre el 16% y el 42% de las combinaciones llegan: hay margen, no es un
+nivel de precisión imposible.
+
+## Y otra vez el bot fue el problema, no el nivel
+
+El primer intento dio **7 tramos de 10 imposibles**. Antes de tocar el
+diseño, tracé uno: el bot pasaba **exactamente por encima** del apoyo
+(distancia mínima 0,01 m) pero llegando a 4,6 m de altura con el destino a
+1,81. Se pasaba de largo por arriba.
+
+El motivo: las peanas miden 0,78 m — ahí no hay carrerilla, se salta casi
+parado — y mi bot barría hasta 0,70 s de carrera y usaba **siempre los dos
+saltos a fondo**. Corregido a barrer también cuántos saltos usar y a qué
+velocidad de crucero volar, regulando con W/S, los diez tramos pasan.
+
+Es la tercera vez esta sesión que un "imposible" era mi piloto. La regla ya
+está clara: cuando el bot dice que no se puede, **trazar antes de rediseñar**.
+
+---
+
+# Cambios — 22 de septiembre de 2026 (decimotercer lote): instanciado
+
+**De 2.307 llamadas de dibujo por fotograma a 18.** Una sola línea de
+diagnóstico cambió todo el diagnóstico.
+
+## La primera medición estaba mal y decía lo contrario
+
+Medí llamadas de dibujo con la cámara mirando en horizontal y salió esto:
+
+```
+  DIFÍCIL   entre 24 y 63 llamadas · unos 2.000 triángulos
+```
+
+Conclusión aparente: no hay nada que optimizar, el descarte por frustum ya
+hace el trabajo. **Falso.** Esa cámara es el caso fácil. Un jugador de este
+juego mira por el eje de la torre casi todo el rato, y ahí el cono de
+visión se traga la columna entera:
+
+```
+  DIFÍCIL   2.307 llamadas · 31.574 triángulos   mirando hacia arriba
+```
+
+2.307 llamadas con 31.574 triángulos es un problema **puro de llamadas**:
+la GPU no está dibujando casi nada, está recibiendo dos mil trescientas
+órdenes para hacerlo. En un móvil de gama media eso hunde los fotogramas
+sin que el contador de triángulos se inmute.
+
+La lección, otra vez la misma de esta sesión: **una medición que solo mira
+el caso cómodo mide la comodidad, no el sistema.**
+
+## El arreglo
+
+`buildMeshes` creaba un `THREE.Mesh` por pieza. Ahora agrupa por (forma,
+material) en `InstancedMesh`: una llamada por grupo, con la matriz de cada
+copia en un buffer. Diez grupos cubren toda la torre.
+
+| | antes | después |
+|---|---|---|
+| llamadas de dibujo (peor caso) | **2.307** | **18** |
+| triángulos en pantalla | 31.574 | 32.650 |
+| objetos en la escena | 2.373 | 10 |
+| actualizar matrices | 0,317 ms/fotograma | **0,003 ms** |
+| construir las mallas | 25 ms | 3 ms |
+
+Los triángulos suben un poco porque ahora se envían todas las copias
+siempre (`frustumCulled = false`): un grupo abarca la torre entera, así que
+cularlo no aportaba nada. 32.650 triángulos no los nota ningún dispositivo
+de esta década.
+
+La física ya estaba bien y no se tocó: **0,002–0,005 ms por fotograma**
+gracias al índice espacial por celdas de 8 m.
+
+## Comprobado que se ve exactamente igual
+
+El instanciado cambia cómo se calcula la transformación de cada pieza, y el
+cilindro tumbado (`cylZ`, con orden de Euler YXZ) es justo donde se tuerce
+si te equivocas. Prueba nueva, `instancias.js`: reconstruye cada matriz con
+el código anterior y la compara con la que entra en el `InstancedMesh`.
+
+```
+  OK  facil    948 matrices idénticas · formas {box:875, cylZ:54, cylV:19}
+  OK  media   1814 matrices idénticas · formas {box:1732, cylZ:56, cylV:26}
+  OK  dificil 2373 matrices idénticas · formas {box:2301, cylZ:28, cylV:44}
+```
+
+Con un matiz que también me hizo tropezar: el primer intento dio "FALLA"
+con desvíos de 6·10⁻⁵. No era un error de transformación —
+`InstancedMesh` guarda las matrices en **float32** y yo las comparaba con
+float64 usando un umbral absoluto. Comparaba formatos, no geometría. Con
+umbral relativo a 2 ulp de float32, las 2.373 coinciden.
+
+## Lo que esto desbloquea
+
+Con una malla por pieza, meter props con textura en la torre era inviable:
+cada prop visible sería otra llamada más sobre las 2.307. Instanciado, un
+bidón repetido doscientas veces es **una** llamada. Es el requisito que
+faltaba para sacar el laboratorio a la torre de verdad.
+
+---
+
+# Cambios — 22 de septiembre de 2026 (duodécimo lote): colisionadores elegidos
+
+Elegidas las formas definitivas de los dos props, con los números medidos.
+
+## El bidón de pie: tres cajas inscritas, no una cuadrada
+
+Tu queja era exacta: *"me posiciono en lo último de la esquina de la caja
+y visualmente ni siquiera estoy tocando el barril"*. Una caja cuadrada
+alrededor de un cilindro sobresale **11,7 cm** en las esquinas.
+
+La trampa está en que **los colisionadores se UNEN, no se intersecan**.
+Añadir cajas solo puede agrandar el sólido, nunca recortarlo. Así que para
+dejar de sobresalir hay que ir por el otro lado: que **cada** caja quepa
+dentro del círculo (a² + b² ≤ R²). La unión de varias inscritas sigue
+estando dentro, y cubre cada vez más.
+
+Optimizado numéricamente para maximizar el radio mínimo de la unión:
+
+| cajas | semi a · semi b | radio mínimo | error |
+|---|---|---|---|
+| 1 circunscrita (lo de antes) | 0,281 · 0,281 | sobresale | **+11,7 cm de aire** |
+| 1 inscrita | 0,199 · 0,199 | 0,199 m | −8,2 cm |
+| 2 | 0,230 · 0,163 | 0,230 m | −5,2 cm |
+| **3** | **0,126 · 0,252** | **0,252 m** | **−3,0 cm** |
+| 4 | 0,101 · 0,263 | 0,263 m | −1,9 cm |
+| 6 | 0,272 · 0,071 | 0,273 m | −0,9 cm |
+
+Elegidas **3, giradas 60° entre sí**. Lo importante no es el tamaño del
+error sino que **cambia de signo**: se pasa de flotar sobre aire a hundirse
+3 cm en la chapa, y hundirse 3 cm no se ve.
+
+Medido con la física real barriendo una rejilla de 61×61 alrededor de cada
+bidón, contando las posiciones donde el jugador queda **apoyado a 0,88 m
+sin que su caja llegue a tocar el círculo**:
+
+```
+  caja cuadrada      76 de 3481 posiciones · hasta 7,1 cm de aire
+  3 cajas inscritas   0 de 2993 posiciones
+```
+
+Cero. Y solo se pierde un 14% de superficie pisable, que era justo la
+falsa. Si quieres afinar más, 4 o 6 cajas están calculadas arriba.
+
+Tumbado se queda como elegiste: la **losa inscrita** sobre la cresta.
+
+## La silla: asiento + respaldo + una caja por pata
+
+Las patas no salían en el mapa de alturas porque están debajo del asiento
+y ningún rayo vertical las ve. Se localizaron agrupando los vértices de la
+geometría por debajo de 0,50 m: cuatro grupos, en x ±0,23 (delanteras) y
+±0,26 (traseras), y **se abren hacia abajo** — a ras de suelo llegan a
+±0,276. La sección de 0,07 cubre ese ensanchado.
+
+Medido: caminando a ras de suelo contra la silla, ahora te paras en
+**x=42,34** con la silla en 43. Antes la atravesabas entera.
+
+**Una cosa honesta sobre las patas:** el hueco libre entre una pata
+delantera y una trasera es de 0,41 m y el jugador mide 0,70, así que nunca
+va a caber entre ellas. Cuatro cajas se comportan igual que una sola caja
+bajo el asiento. Se dejan las cuatro porque son fieles al objeto y no
+cuestan nada, pero no esperes notar la diferencia.
+
+## El coste
+
+El laboratorio pasó de 14 a **40 cajas de colisión** para 13 props: tres
+por bidón de pie y seis por silla. En una torre con doscientos bidones eso
+son 600 cajas más sobre las 2.373 piezas actuales. El índice espacial por
+celdas de 8 m lo absorbe, pero conviene tenerlo escrito antes de que
+sorprenda.
+
+## Dos diagnósticos míos que mintieron
+
+- El agrupado de patas por cercanía usa un centroide que se va desviando
+  según añade puntos, y perdió las bases de las patas porque se abren.
+- Y mi rebanado decía "no hay vértices por debajo de 0,12", cuando hay
+  **100 justo en y=0**. Era la ventana de filtrado de mi propio
+  diagnóstico, no el modelo. Se arregló midiendo sobre todos los vértices
+  sin ventana de por medio.
+
+---
+
 # Cambios — 22 de septiembre de 2026 (undécimo lote): la silla, y cómo se decide dónde van las cajas
 
 Segundo prop en el laboratorio: `painted_wooden_chair_02`, **1.246

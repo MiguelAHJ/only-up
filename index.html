@@ -1261,27 +1261,61 @@ function initWorld(){
   ajustarLienzo();
 }
 
+/* Una malla por pieza costaba UNA LLAMADA DE DIBUJO por pieza. Medido en
+   DIFÍCIL mirando por el eje de la torre —que es lo que hace un jugador
+   todo el rato— salían 2.307 llamadas por fotograma con solo 31.574
+   triángulos: el descarte por frustum no salva nada, porque la torre es
+   una columna estrecha y el cono de visión se la traga entera.
+
+   Ahora se agrupa por (forma, material) en InstancedMesh: la GPU recibe
+   una sola llamada por grupo con la matriz de cada copia. Los triángulos
+   son los mismos y siguen siendo una miseria; las llamadas pasan de
+   miles a un puñado. Además desaparece el coste de actualizar 2.373
+   matrices por fotograma, porque ahora hay menos de diez objetos. */
 function buildMeshes(tower){
-  if (W.group){ W.scene.remove(W.group); }
-  W.group=new THREE.Group();
-  const boxGeo=new THREE.BoxGeometry(1,1,1);
-  const cylGeo=new THREE.CylinderGeometry(0.5,0.5,1,12);
-  for (const v of tower.visuals){
-    const mat=MATS[v.mat]||MATS.hormigon;
-    let m;
-    if (v.shape==="box"){
-      m=new THREE.Mesh(boxGeo,mat); m.scale.set(v.sx,v.sy,v.sz);
-    } else if (v.shape==="cylV"){
-      m=new THREE.Mesh(cylGeo,mat); m.scale.set(v.sx,v.sy,v.sx);
-    } else {
-      m=new THREE.Mesh(cylGeo,mat); m.scale.set(v.sx,v.sy,v.sx);
-      m.rotation.x=Math.PI/2;
-    }
-    m.position.set(v.cx,v.cy,v.cz);
-    if (v.shape==="cylZ"){ m.rotation.order="YXZ"; m.rotation.y=v.yaw; m.rotation.x=Math.PI/2; }
-    else m.rotation.y=v.yaw;
-    W.group.add(m);
+  if (W.group){
+    W.group.traverse(o => { if (o.isInstancedMesh) o.dispose(); });
+    W.scene.remove(W.group);
   }
+  W.group = new THREE.Group();
+  const geos = {
+    box:  W._geoBox  || (W._geoBox  = new THREE.BoxGeometry(1,1,1)),
+    cylV: W._geoCyl  || (W._geoCyl  = new THREE.CylinderGeometry(0.5,0.5,1,12)),
+  };
+  geos.cylZ = geos.cylV;
+
+  // se cuenta cuántas copias lleva cada grupo antes de reservar
+  const grupos = new Map();
+  for (const v of tower.visuals){
+    const clave = v.shape + "|" + (MATS[v.mat] ? v.mat : "hormigon");
+    grupos.set(clave, (grupos.get(clave) || 0) + 1);
+  }
+  const mallas = new Map(), n = new Map();
+  for (const [clave, total] of grupos){
+    const [forma, mat] = clave.split("|");
+    const im = new THREE.InstancedMesh(geos[forma] || geos.box, MATS[mat], total);
+    im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    im.frustumCulled = false;      // el grupo abarca toda la torre: cularlo no aporta
+    mallas.set(clave, im); n.set(clave, 0);
+    W.group.add(im);
+  }
+
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(),
+        e = new THREE.Euler(), pos = new THREE.Vector3(), esc = new THREE.Vector3();
+  for (const v of tower.visuals){
+    const clave = v.shape + "|" + (MATS[v.mat] ? v.mat : "hormigon");
+    const im = mallas.get(clave), i = n.get(clave);
+    if (v.shape === "box")      esc.set(v.sx, v.sy, v.sz);
+    else                        esc.set(v.sx, v.sy, v.sx);
+    // el cilindro tumbado se acuesta girando X 90°, con el yaw aplicado antes
+    if (v.shape === "cylZ") e.set(Math.PI/2, v.yaw, 0, "YXZ");
+    else                   e.set(0, v.yaw, 0, "YXZ");
+    q.setFromEuler(e);
+    pos.set(v.cx, v.cy, v.cz);
+    im.setMatrixAt(i, m4.compose(pos, q, esc));
+    n.set(clave, i + 1);
+  }
+  for (const im of mallas.values()) im.instanceMatrix.needsUpdate = true;
   W.scene.add(W.group);
 }
 
@@ -2234,7 +2268,7 @@ function spec(k,v,em){
    datos que devuelve buildTower, así que la cámara, las colisiones y el HUD
    funcionan sin enterarse de que esto no es una torre de verdad.
    ═══════════════════════════════════════════════════════════════ */
-const LAB = { modelos:{}, grupo:null, alambres:null, verAlambres:true, aviso:"" };
+const LAB = { modelos:{}, grupo:null, alambres:null, verAlambres:true, aviso:"", ruta:[] };
 
 /* Cada prop con sus colisionadores en el sistema del propio modelo: centro
    de la caja envolvente en x=0,z=0 y base en y=0.
@@ -2244,10 +2278,32 @@ const LAB = { modelos:{}, grupo:null, alambres:null, verAlambres:true, aviso:"" 
    pruebas, fuera del repo). El asiento salió plano al milímetro: del
    percentil 10 al 90 hay 0,0 cm de desnivel. */
 const PROPS = {
-  bidon: { ruta:"modelos/barril/Barrel_01_1k.gltf" },
+  /* BIDÓN. De pie, una caja cuadrada sobresale 11,7 cm en las esquinas y
+     te deja de pie sobre aire visible. Como los colisionadores se UNEN y
+     no se intersecan, la única forma de no sobresalir es que cada caja
+     quepa DENTRO del círculo (a²+b² ≤ R²). Tres cajas giradas 60° entre
+     sí, optimizadas para maximizar el radio mínimo de la unión, cubren el
+     89% del radio: el error pasa de +11,7 cm de aire a −3,0 cm de
+     hundimiento, que no se ve. Con 4 cajas serían −1,9 y con 6, −0,9.
+     Tumbado, la losa sobre la cresta (3,0 cm en el peor punto). */
+  bidon: { ruta:"modelos/barril/Barrel_01_1k.gltf",
+           dePie:   [ {c:[0,0.440,0], t:[0.252,0.880,0.504], yaw:0},
+                      {c:[0,0.440,0], t:[0.252,0.880,0.504], yaw:Math.PI/3},
+                      {c:[0,0.440,0], t:[0.252,0.880,0.504], yaw:2*Math.PI/3} ],
+           tumbado: [ {c:[0,0.513,0], t:[0.240,0.100,0.880], yaw:0} ] },
+
+  /* SILLA. Plana a trozos, que es donde el colisionador compuesto gana.
+     Asiento y respaldo salen del mapa de alturas por rayos; las patas no
+     salen ahí (están debajo del asiento) y se localizaron agrupando los
+     vértices de la geometría por debajo de 0,50 m. Se abren hacia abajo,
+     así que la sección de 0,07 cubre el ensanchado. */
   silla: { ruta:"modelos/silla/painted_wooden_chair_02_1k.gltf",
            asiento: { c:[0, 0.535,  0.060], t:[0.570, 0.100, 0.532] },
-           respaldo:{ c:[0, 0.924, -0.261], t:[0.629, 0.679, 0.131] } }
+           respaldo:{ c:[0, 0.924, -0.261], t:[0.629, 0.679, 0.131] },
+           patas: [ {c:[-0.231, 0.2425,  0.272], t:[0.07, 0.485, 0.07]},
+                    {c:[ 0.226, 0.2425,  0.272], t:[0.07, 0.485, 0.07]},
+                    {c:[-0.263, 0.2425, -0.212], t:[0.07, 0.485, 0.07]},
+                    {c:[ 0.263, 0.2425, -0.212], t:[0.07, 0.485, 0.07]} ] }
 };
 
 function cargarProps(cb){
@@ -2296,72 +2352,145 @@ function montarLab(){
   const R = B.x/2;
 
   const solids = [], visuals = [], props = [];
-  const caja = (cx,cy,cz,sx,sy,sz,mat,choca) => {
-    if (mat)   visuals.push({cx,cy,cz,sx,sy,sz,yaw:0,mat,shape:"box"});
-    if (choca) solids.push({x:cx,y:cy,z:cz,hw:sx/2,hh:sy/2,hd:sz/2,yaw:0});
+  const caja = (cx,cy,cz,sx,sy,sz,mat,choca,yaw) => {
+    if (mat)   visuals.push({cx,cy,cz,sx,sy,sz,yaw:yaw||0,mat,shape:"box"});
+    if (choca) solids.push({x:cx,y:cy,z:cz,hw:sx/2,hh:sy/2,hd:sz/2,yaw:yaw||0});
   };
   const placa = (x,mat) => caja(x,0.012,0, 3.0,0.024,3.0, mat, false);
-  const pon   = (tipo,x,y,tumbado) => props.push({tipo,x,y,tumbado});
-  // coloca una caja del PROPS relativa a la base del prop en (x, y)
-  const deProp = (x, y, b) => caja(x + b.c[0], y + b.c[1], b.c[2], b.t[0], b.t[1], b.t[2], null, true);
+  const pon   = (tipo,x,y,tumbado,z,giro) => props.push({tipo,x,y,z:z||0,tumbado,giro:giro||0});
+  /* Coloca las cajas de un prop con su base en (x,y,z) y girado por yaw.
+     El motor define el giro así: una caja con yaw tiene su eje local +z
+     apuntando al mundo (sin yaw, cos yaw). Invirtiendo esa relación, un
+     desplazamiento local (lx,lz) cae en el mundo en
+        dx =  lx·cos + lz·sen        dz = −lx·sen + lz·cos
+     Hacer esto a mano es donde se cuelan los signos, así que va una sola
+     vez aquí y todo lo demás lo usa. */
+  const deProp = (x, y, lista, z, giro) => {
+    const g = giro || 0, c0 = Math.cos(g), s0 = Math.sin(g);
+    for (const b of (Array.isArray(lista) ? lista : [lista])){
+      const dx =  b.c[0]*c0 + b.c[2]*s0;
+      const dz = -b.c[0]*s0 + b.c[2]*c0;
+      caja(x + dx, y + b.c[1], (z||0) + dz, b.t[0], b.t[1], b.t[2], null, true, g + (b.yaw||0));
+    }
+  };
 
-  caja(24,-0.5,0, 68,1,16, "hormigon", true);                    // suelo
+  caja(24,-0.5,0, 72,1,16, "hormigon", true);                    // suelo del banco
 
   // ── BIDONES ─────────────────────────────────────────────────────────
-  // 1 · de pie: la caja coincide con el objeto, no se nota nada
-  placa(4,"galv");     pon("bidon",4,0,false);
+  // 1 · de pie con la caja cuadrada de antes: 11,7 cm de aire en la esquina
+  placa(4,"oxido");    pon("bidon",4,0,false);
   caja(4, B.y/2, 0, B.x, B.y, B.z, null, true);
 
-  // 2 · tumbado con la caja ENVOLVENTE: se flota hasta 19 cm en los flancos
-  placa(9,"oxido");    pon("bidon",9,0,true);
-  caja(9, R, 0, B.x, B.x, B.y, null, true);
+  // 2 · de pie con las TRES cajas inscritas: ya no sobresale nada
+  placa(9,"galv");     pon("bidon",9,0,false);
+  deProp(9, 0, PROPS.bidon.dePie);
 
-  // 3 · tumbado con la LOSA INSCRITA: pisas la chapa que ves
-  placa(14,"pintado"); pon("bidon",14,0,true);
-  caja(14, B.x - 0.05, 0, 0.24, 0.10, B.y, null, true);
+  // 3 · tumbado con la caja ENVOLVENTE: se flota hasta 19 cm en los flancos
+  placa(14,"oxido");   pon("bidon",14,0,true);
+  caja(14, R, 0, B.x, B.x, B.y, null, true);
 
-  // 4 · pila de tres
-  placa(19,"galv");
-  for (let i=0;i<3;i++){ pon("bidon",19, i*B.y, false);
-    caja(19, i*B.y + B.y/2, 0, B.x, B.y, B.z, null, true); }
+  // 4 · tumbado con la LOSA INSCRITA: pisas la chapa que ves
+  placa(19,"galv");    pon("bidon",19,0,true);
+  deProp(19, 0, PROPS.bidon.tumbado);
 
-  // 5 · dos separados 3,5 m para saltar entre ellos
-  for (const x of [25, 28.5]){ placa(x,"pintado"); pon("bidon",x,0,false);
-    caja(x, B.y/2, 0, B.x, B.y, B.z, null, true); }
+  // 5 · pila de tres, ya con las cajas inscritas
+  placa(24,"galv");
+  for (let i=0;i<3;i++){ pon("bidon",24, i*B.y, false); deProp(24, i*B.y, PROPS.bidon.dePie); }
+
+  // 6 · dos separados 3,5 m para saltar entre ellos
+  for (const x of [29, 32.5]){ placa(x,"pintado"); pon("bidon",x,0,false);
+    deProp(x, 0, PROPS.bidon.dePie); }
 
   // ── SILLAS ──────────────────────────────────────────────────────────
-  // 6 · UNA sola caja: el techo queda en 1,264 y el asiento está en 0,585.
-  //     Son 68 cm de aire. Es lo que pasa por tratar un objeto hueco como
-  //     un bloque, y por eso las sillas estaban en mi lista negra.
-  placa(34,"oxido");   pon("silla",34,0,false);
-  caja(34, S.y/2, 0, S.x, S.y, S.z, null, true);
+  // 7 · una sola caja: el techo en 1,264 y el asiento en 0,585 — 68 cm de aire
+  placa(38,"oxido");   pon("silla",38,0,false);
+  caja(38, S.y/2, 0, S.x, S.y, S.z, null, true);
 
-  /* 7 · DOS cajas: asiento + respaldo, las dos sólidas. Es lo honesto,
-     pero medido tiene una consecuencia que no se ve venir: la planta del
-     jugador mide 0,70 m y el asiento solo 0,53 de fondo, así que cayendo
-     al centro el pie pisa TAMBIÉN el respaldo y te quedas de pie encima de
-     él, a 1,264 m. Para sentarte de verdad hay que caer por delante del
-     respaldo: medido, la franja va de z=0,13 a z=0,65 — 52 cm, más de lo
-     que parece, porque media planta puede volar por delante del borde. */
-  placa(39,"galv");    pon("silla",39,0,false);
-  deProp(39, 0, PROPS.silla.asiento);
-  deProp(39, 0, PROPS.silla.respaldo);
+  /* 8 · la silla completa: asiento + respaldo + una caja por pata.
+     Ojo a la consecuencia del respaldo sólido: cayendo al centro el pie
+     (0,70 m) pisa también el respaldo y te quedas encima de él, a 1,264.
+     Para sentarte hay que caer por delante, en la franja z 0,13 … 0,65. */
+  placa(43,"galv");    pon("silla",43,0,false);
+  deProp(43, 0, PROPS.silla.asiento);
+  deProp(43, 0, PROPS.silla.respaldo);
+  deProp(43, 0, PROPS.silla.patas);
 
-  /* 8 · SOLO el asiento; el respaldo queda de adorno y se atraviesa. La
-     silla pasa a ser lo que interesa en un juego de escalar: una
-     plataforma limpia de 0,57 × 0,53 a 0,585 m de altura. */
-  placa(44,"pintado"); pon("silla",44,0,false);
-  deProp(44, 0, PROPS.silla.asiento);
-
-  // 9 · dos de esas, para saltar de asiento a asiento
-  for (const x of [49, 51.6]){
-    placa(x,"oxido"); pon("silla",x,0,false);
+  // 9 · dos sillas completas, para saltar de asiento a asiento
+  for (const x of [48, 50.6]){
+    placa(x,"pintado"); pon("silla",x,0,false);
     deProp(x, 0, PROPS.silla.asiento);
+    deProp(x, 0, PROPS.silla.respaldo);
+    deProp(x, 0, PROPS.silla.patas);
   }
+
+  /* ── MINITORRE ────────────────────────────────────────────────────
+     Un nivel pequeño de verdad, ~11 m, construido solo con los dos props.
+     Diez estaciones en espiral, y los props **flotan**: no hay peana
+     debajo. Lo único sólido de cada estación son las cajas del propio
+     objeto, así que el apoyo es el objeto y nada más.
+
+     La gracia está en el GIRO. El motor solo sabe girar por yaw, así que
+     nada se puede tumbar en diagonal — pero orientar sí cambia el salto:
+       · bidón de pie      una peana redonda, el caso fácil
+       · bidón tumbado     una viga de 24 cm: o caes a lo largo o te caes
+       · silla de frente   aterrizas en el asiento y el respaldo te frena
+       · silla de lado     el respaldo pasa a ser un muro lateral
+       · silla escalón     asiento 0,585 → respaldo 1,264, dos alturas
+     Los apoyos se apuntan en `ruta` para poder verificar el recorrido
+     entero con la física real. */
+  const MT = { x:-16, z:0, r:3.0, dAng:55*Math.PI/180, sube:1.25 };
+  const ruta = [];
+  const EST = ["bidonPie","bidonTumbado","sillaFrente","bidonPie","bidonTumbado",
+               "sillaLado","bidonPie","sillaEscalon","bidonTumbado","meta"];
+  const posEst = (k) => {
+    const a = k*MT.dAng;
+    return { x: MT.x + MT.r*Math.cos(a), z: MT.z + MT.r*Math.sin(a), y: k*MT.sube, a };
+  };
+  caja(MT.x, -0.5, MT.z, 14, 1, 14, "hormigon", true);           // suelo de la minitorre
+
+  for (let k=0;k<EST.length;k++){
+    const P = posEst(k), ant = posEst(Math.max(0,k-1));
+    // el yaw que pone el +z local del prop mirando a la estación anterior
+    const haciaAtras = Math.atan2(ant.x - P.x, ant.z - P.z);
+    const tangente   = -P.a;                 // +z local a lo largo de la espiral
+    const tipo = EST[k];
+
+    if (tipo === "meta"){
+      caja(P.x, P.y - 0.09, P.z, 1.4, 0.18, 1.4, "peligro", true);  // la meta sí es una plataforma
+      ruta.push({ x:P.x, y:P.y, z:P.z, que:"meta" });
+      continue;
+    }
+
+    if (tipo === "bidonPie"){
+      pon("bidon", P.x, P.y, false, P.z, 0);
+      deProp(P.x, P.y, PROPS.bidon.dePie, P.z, 0);
+      ruta.push({ x:P.x, y:P.y+0.880, z:P.z, que:"bidón de pie" });
+    } else if (tipo === "bidonTumbado"){
+      const g = (k===4) ? (Math.PI/2 - P.a) : tangente;          // uno radial, a propósito
+      pon("bidon", P.x, P.y, true, P.z, g);
+      deProp(P.x, P.y, PROPS.bidon.tumbado, P.z, g);
+      ruta.push({ x:P.x, y:P.y+0.563, z:P.z, que:"bidón tumbado" });
+    } else {
+      const g = (tipo === "sillaLado") ? haciaAtras + Math.PI/2 : haciaAtras;
+      pon("silla", P.x, P.y, false, P.z, g);
+      deProp(P.x, P.y, PROPS.silla.asiento,  P.z, g);
+      deProp(P.x, P.y, PROPS.silla.respaldo, P.z, g);
+      deProp(P.x, P.y, PROPS.silla.patas,    P.z, g);
+      /* El apoyo útil no es el centro del asiento: cayendo ahí el pie pisa
+         también el respaldo. Se apunta 0,30 m hacia el frente del asiento,
+         que está dentro de la franja medida (z 0,13 … 0,65). */
+      ruta.push({ x:P.x + 0.30*Math.sin(g), y:P.y+0.585, z:P.z + 0.30*Math.cos(g),
+                  que: tipo==="sillaLado" ? "silla de lado" : "silla, asiento" });
+      if (tipo === "sillaEscalon")
+        ruta.push({ x:P.x - 0.26*Math.sin(g), y:P.y+1.264, z:P.z - 0.26*Math.cos(g),
+                    que:"silla, respaldo" });
+    }
+  }
+  LAB.ruta = ruta;
 
   G.tower = indexarTorre({ solids, visuals, apoyos:[],
     summit:{x:0,y:99999,z:0},                     // inalcanzable: aquí no se gana
-    start:{x:0,z:0,yaw:-Math.PI/2},               // fx=-sin(yaw): mirando a +x
+    start:{x:MT.x, z:MT.z + 4.6, yaw:Math.PI},    // al pie de la minitorre, mirando a -z
     altura:20, informe:{piezas:solids.length} });
   buildMeshes(G.tower);
 
@@ -2372,12 +2501,16 @@ function montarLab(){
     const mod = LAB.modelos[b.tipo];
     if (!mod) continue;
     const c = mod.obj.clone(true);
+    /* Orden YXZ: primero se acuesta (X) y luego se orienta (Y), que es la
+       misma composición que aplica el motor a la caja. */
+    c.rotation.order = "YXZ";
+    c.rotation.y = b.giro || 0;
     if (b.tumbado) c.rotation.x = Math.PI/2;
     /* Se recoloca midiendo la caja YA girada en vez de calcular el
        desplazamiento a mano: tumbado, el origen deja de estar donde crees. */
     c.updateMatrixWorld(true);
     const bb = new THREE.Box3().setFromObject(c), ce = bb.getCenter(new THREE.Vector3());
-    c.position.set(b.x - ce.x, b.y - bb.min.y, -ce.z);
+    c.position.set(b.x - ce.x, b.y - bb.min.y, (b.z||0) - ce.z);
     LAB.grupo.add(c);
   }
   W.scene.add(LAB.grupo);
@@ -2391,6 +2524,7 @@ function montarLab(){
       new THREE.EdgesGeometry(new THREE.BoxGeometry(s.hw*2, s.hh*2, s.hd*2)),
       new THREE.LineBasicMaterial({color:0xE8B23A}));
     l.position.set(s.x, s.y, s.z);
+    l.rotation.y = s.yaw || 0;
     LAB.alambres.add(l);
   }
   LAB.alambres.visible = LAB.verAlambres;
@@ -2407,14 +2541,15 @@ function pintarLab(){
   const n = (i) => '<span class="n">' + i + '</span> ';
   $("labinfo").innerHTML =
     (LAB.aviso ? '<span class="mal">· ' + LAB.aviso + ' ·</span><br>' : '') +
-    '<b>LABORATORIO</b> &nbsp;·&nbsp; BIDONES &nbsp; ' +
-    n(1) + 'de pie &nbsp; ' +
-    n(2) + 'tumbado <span class="mal">caja envolvente</span> &nbsp; ' +
-    n(3) + 'tumbado <span class="bien">losa inscrita</span> &nbsp; ' +
-    n(4) + 'pila &nbsp; ' + n(5) + 'salto de 3,5 m<br>' +
-    'SILLAS &nbsp; ' + n(6) + '<span class="mal">una caja</span> · 68 cm de aire &nbsp; ' +
-    n(7) + 'asiento + respaldo · <span class="mal">acabas encima del respaldo</span> &nbsp; ' +
-    n(8) + '<span class="bien">solo asiento</span> &nbsp; ' +
+    '<b>MINITORRE</b> aquí mismo · ~11 m con los dos props, unos girados &nbsp;·&nbsp; el banco de pruebas está al este<br>' +
+    '<b>BANCO</b> &nbsp;·&nbsp; BIDÓN &nbsp; ' +
+    n(1) + 'de pie <span class="mal">caja cuadrada</span> &nbsp; ' +
+    n(2) + 'de pie <span class="bien">3 cajas inscritas</span> &nbsp; ' +
+    n(3) + 'tumbado <span class="mal">envolvente</span> &nbsp; ' +
+    n(4) + 'tumbado <span class="bien">losa</span> &nbsp; ' +
+    n(5) + 'pila &nbsp; ' + n(6) + 'salto 3,5 m<br>' +
+    'SILLA &nbsp; ' + n(7) + '<span class="mal">una caja</span> · 68 cm de aire &nbsp; ' +
+    n(8) + '<span class="bien">asiento + respaldo + 4 patas</span> &nbsp; ' +
     n(9) + 'salto de asiento a asiento<br>' +
     tecla + ' alambres de colisión: <b>' + (LAB.verAlambres ? "sí" : "no") + '</b>' +
     ' &nbsp;·&nbsp; <span class="tec">Ctrl+Alt+B</span> salir';
@@ -2755,7 +2890,7 @@ if (location.hash.replace(/^#/,"").split(/[&,;]/).includes("lab")) abrirLab();
 // Gancho de depuración: solo con #debug en la URL. Sirve para medir la
 // corrección de posición al aterrizar y comprobar que no hay tirón.
 if (/\bdebug\b/.test(location.hash)){
-  window.__T = { G, CAPS, AV, W, play, respawn, Net, Perf,
+  window.__T = { G, CAPS, AV, W, play, respawn, Net, Perf, buildMeshes,
                  regenerate, buildTower, indexarTorre, doJump, JumpMath, MURO_ALTO,
                  colocarSendero, colocarCornisa, colocarTrampolines, DIFS,
                  TRAMPOLIN_ALTO, TRAMPOLIN_V,

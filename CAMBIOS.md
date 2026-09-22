@@ -80,6 +80,31 @@ Quitado. Reiniciar ya existía donde debe estar, en el menú de pausa
 ("VOLVER AL SUELO · Reinicia la subida"), detrás de un paso más. La tecla R
 sigue igual en escritorio, que no se pulsa por accidente.
 
+## La franja oscura (corregido sobre la marcha)
+
+La primera versión que se desplegó dejaba una franja oscura alrededor del
+juego en el móvil, y en el menú se veía la torre asomando por los bordes.
+Ambas cosas eran lo mismo: **el lienzo y las capas medían menos que la
+pantalla y asomaba el fondo del `body`**. Dos causas, las dos mías:
+
+1. `renderer.setSize(innerWidth, innerHeight)`. En un móvil esos dos
+   números no son la caja real: hay muesca de cámara, barra de gestos y
+   una barra de direcciones que se retrae. Ahora el lienzo se mide del
+   **contenedor** con un `ResizeObserver`, que no se puede desincronizar
+   porque salta cuando la caja cambia, sea por lo que sea.
+2. Todas las capas a pantalla completa eran `position:absolute`, que se
+   resuelve contra el bloque contenedor inicial — y en el móvil ese no es
+   la pantalla que estás viendo. Ahora son `position:fixed`.
+
+También se quitó el `100dvh` que había añadido en el mismo lote: lo puse
+sin poder probarlo en un teléfono de verdad, y con `fixed` +
+`ResizeObserver` ya no hace falta.
+
+Prueba nueva, `lienzo.js`: exige que en seis tamaños distintos, y después
+de girar, el lienzo y todas las capas visibles midan exactamente lo que la
+ventana y arranquen en 0,0. Es la comprobación que no existía y por eso
+esto llegó a producción.
+
 ## Un fallo que fue mío, no del código
 
 La primera prueba del botón de salto daba `vy=0`. No era el juego: mi test

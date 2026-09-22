@@ -56,9 +56,10 @@
   #btnPausaT{right:calc(16px + env(safe-area-inset-right,0px));
     top:calc(14px + env(safe-area-inset-top,0px));
     width:44px;height:44px;border-radius:10px;font-size:15px}
-  #btnCaerT{right:calc(150px + env(safe-area-inset-right,0px));
-    bottom:calc(44px + env(safe-area-inset-bottom,0px));
-    width:62px;height:44px;border-radius:10px;font-size:10px}
+  /* Aquí hubo un botón de reinicio al lado de SALTAR. Mala idea: respawn()
+     te manda al suelo, o sea que borra la subida entera, y estaba a 46 px
+     del pulgar que salta. Reiniciar vive donde debe, en el menú de pausa
+     ("VOLVER AL SUELO"), detrás de un paso más. */
 
   /* pantalla de "gira el móvil" */
   #gira{position:absolute;inset:0;z-index:40;display:none;flex-direction:column;
@@ -255,7 +256,6 @@
 <div id="tactil">
   <div id="joy"><div class="anillo"></div><div id="joyKnob"></div></div>
   <button class="btnT" id="btnSalto" type="button">SALTAR</button>
-  <button class="btnT" id="btnCaerT" type="button">CAER</button>
   <button class="btnT" id="btnPausaT" type="button" aria-label="Pausa">❚❚</button>
 </div>
 
@@ -2375,7 +2375,7 @@ function moverStick(t){
 addEventListener("touchstart", e => {
   if (G.mode !== "play") return;
   for (const t of e.changedTouches){
-    if (dentroDe($("btnSalto"),t) || dentroDe($("btnPausaT"),t) || dentroDe($("btnCaerT"),t)) continue;
+    if (dentroDe($("btnSalto"),t) || dentroDe($("btnPausaT"),t)) continue;
     if (Tacto.stick === null && t.clientX < innerWidth*0.46){
       Tacto.stick = t.identifier;
       Tacto.base = { x:t.clientX, y:t.clientY };      // flotante: nace donde cae el pulgar
@@ -2425,7 +2425,6 @@ function botonT(id, fn){
   el.addEventListener("click", () => fn());          // mando o ratón sobre la misma UI
 }
 botonT("btnSalto",  () => { if (G.mode==="play"){ G.buffer=BUFFER; doJump(); } });
-botonT("btnCaerT",  () => { if (G.mode==="play") respawn(); });
 botonT("btnPausaT", () => { if (G.mode==="play") pause(); });
 
 /* En vertical no se ve hacia arriba, que es el único sitio donde se mira

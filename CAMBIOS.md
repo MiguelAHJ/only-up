@@ -1,3 +1,109 @@
+# Cambios — 22 de septiembre de 2026 (noveno lote): se puede jugar en el móvil
+
+Hasta hoy, abrir el juego en el teléfono era mirar una torre sin poder
+hacer absolutamente nada. No era un problema de rendimiento: es que no
+había entrada táctil. Dos líneas lo explicaban todo:
+
+```js
+if (k["KeyW"]||k["ArrowUp"]) iz+=1;   // moverse = teclado, y solo teclado
+if (!el.requestPointerLock) return;    // mirar = pointer lock, que en iOS y Android no existe
+```
+
+**No se ha tocado la física.** La capa nueva traduce dedos a exactamente lo
+mismo que ya producía el teclado: `G.stick` para moverse y `G.yaw`/`G.pitch`
+para mirar. La verificación de DIFÍCIL da los mismos números que antes del
+cambio, dígito a dígito: 0 imposibles, 1134/1168 rebotes, 1251/1251
+steppers, 264/271 senderos.
+
+## Qué hay
+
+- **Joystick flotante** en la mitad izquierda: nace donde cae el pulgar, no
+  en una posición fija. Radio 58 px, zona muerta al 20%.
+- **Arrastrar en la mitad derecha** mueve la cámara, 0,0045 rad por píxel.
+- **SALTAR** y **pausa**. Con `touchstart`, no con `click`: el click puede
+  llegar 300 ms tarde y aquí los milisegundos son el juego.
+- **Multitáctil**: correr y mirar a la vez, cada dedo con su identificador.
+  Un dedo sobre un botón no cuenta además como arrastre de cámara.
+- **Aviso de "gira el móvil"** en vertical, que además pausa la partida.
+
+## Lo bueno que salió sin buscarlo: andar es analógico
+
+Con teclado, andar es un interruptor — Shift o nada. Con el stick es
+continuo: inclinarlo poco anda, a fondo corre, e interpola entre medias.
+
+```js
+const target = analog >= 0
+  ? AV.walkSpeed + (AV.runSpeed - AV.walkSpeed) *
+      clamp((analog - STICK_ANDAR) / (STICK_CORRER - STICK_ANDAR), 0, 1)
+  : ((k["ShiftLeft"]||k["ShiftRight"]) ? AV.walkSpeed : AV.runSpeed);
+```
+
+Esto importa de verdad y no es un adorno: cuando se calibraron las
+cornisas, el bot midió que en varias de ellas **salir andando era la única
+forma de llegar**. En ese punto concreto el móvil tiene mejor control que
+el teclado. Medido: con el stick al 24% la velocidad es 3,39 m/s (andar son
+3,2) y al tope 6,40 (correr son 6,4).
+
+`G.stick` es `null` mientras no haya un dedo puesto, así que la rama
+analógica no existe para el teclado ni para el bot. Por eso la regresión
+sale idéntica.
+
+## Las trampas de Safari, que son las que se comen la tarde
+
+Ninguna es interesante y todas rompen el juego:
+
+- `touch-action:none` — sin esto, el doble toque hace zoom y arrastrar hace
+  scroll. Solo mientras se juega (`body.jugando`), porque si no el menú
+  deja de poder hacer scroll en pantallas pequeñas.
+- `overscroll-behavior:none` — tirar hacia abajo recargaba la página.
+- `-webkit-touch-callout:none` — una pulsación larga sacaba el menú de
+  copiar encima del juego.
+- `100dvh` en lugar de `100%` — en iOS la barra de direcciones aparece y
+  desaparece durante la partida, y el lienzo se quedaba de otro tamaño que
+  la ventana. Además se escucha `visualViewport.resize`, porque ese cambio
+  no dispara `resize`.
+- `lock()` sale antes si es táctil: pedir pointer lock en el móvil aborta
+  con error.
+
+## El botón que sobraba
+
+La primera versión tenía además un botón "CAER" al lado de SALTAR, que
+llamaba a `respawn()`. Mala idea por tres motivos a la vez y lo pregunto
+Miguel antes de que lo descubriera nadie a base de perder una partida:
+
+1. `respawn()` no te deja caer un poco: te pone en `G.py = 1.4`, o sea al
+   pie de la torre. En DIFÍCIL eso borra 1800 metros de subida.
+2. La etiqueta "CAER" sugiere algo suave. Mentía.
+3. Estaba a 46 px del botón de saltar, justo donde vive el pulgar.
+
+Quitado. Reiniciar ya existía donde debe estar, en el menú de pausa
+("VOLVER AL SUELO · Reinicia la subida"), detrás de un paso más. La tecla R
+sigue igual en escritorio, que no se pulsa por accidente.
+
+## Un fallo que fue mío, no del código
+
+La primera prueba del botón de salto daba `vy=0`. No era el juego: mi test
+disparaba el `TouchEvent` sobre `document.body`, y el botón no está en esa
+ruta de propagación. Un dedo real lo despacha sobre el botón. Corregido el
+test, pasa. Van ya unas cuantas veces esta sesión en que lo que fallaba era
+la medición y no lo medido.
+
+## Qué queda
+
+- **Rendimiento sin medir.** Cada pieza de la torre es una malla suelta
+  (`buildMeshes` hace un `new THREE.Mesh` por visual) y DIFÍCIL tiene 2.373.
+  En escritorio va; en un móvil de gama media, ni idea. Si hace falta, se
+  arregla con `InstancedMesh`, que además es justo lo que van a necesitar
+  los modelos de Poly Haven.
+- **La precisión sigue siendo dura.** Cronometrar el segundo salto en el
+  aire y calcular cadenas de trampolines con el pulgar es más difícil que
+  con teclado, y el pulgar tapa justo la zona donde vas a caer. DIFÍCIL en
+  móvil va a ser durísimo. No es un fallo, es una consecuencia.
+- Sin soporte de mando todavía (Gamepad API), que serían unas 40 líneas y
+  serviría también en escritorio.
+
+---
+
 # Cambios — 21 de septiembre de 2026 (octavo lote): dificultad DIFÍCIL
 
 1800 m. Todo lo de media, más apretado, más dos cosas nuevas: **steppers**

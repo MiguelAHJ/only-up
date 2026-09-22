@@ -18,9 +18,70 @@
   }
   *{box-sizing:border-box}
   html,body{height:100%;margin:0;background:var(--void);color:var(--bone);font-family:var(--sans);overflow:hidden}
+  /* dvh, no vh: en iOS la barra de direcciones aparece y desaparece durante
+     la partida y con vh el lienzo se queda de otro tamaño que la ventana. */
+  @supports (height:100dvh){ html,body{height:100dvh} }
   canvas{display:block}
   button{font:inherit;color:inherit;cursor:pointer}
   #scene{position:absolute;inset:0}
+
+  /* ── móvil ────────────────────────────────────────────────────────────
+     Sin esto el navegador se come los gestos antes que el juego: doble
+     toque hace zoom, arrastrar hace scroll, tirar hacia abajo recarga la
+     página y una pulsación larga saca el menú de copiar.               */
+  body{-webkit-tap-highlight-color:transparent; overscroll-behavior:none}
+  body.tactil{-webkit-user-select:none; user-select:none; -webkit-touch-callout:none}
+  body.tactil.jugando{touch-action:none}     /* solo jugando: el menú sigue haciendo scroll */
+
+  #tactil{position:absolute;inset:0;z-index:3;pointer-events:none;display:none}
+  body.tactil.jugando #tactil{display:block}
+
+  #joy{position:absolute;width:132px;height:132px;margin:-66px 0 0 -66px;
+    border-radius:50%;border:1.5px solid var(--edge);
+    background:radial-gradient(circle,rgba(232,228,220,.07),rgba(232,228,220,.02));
+    opacity:0;transition:opacity .12s}
+  #joy.on{opacity:1}
+  #joyKnob{position:absolute;left:50%;top:50%;width:54px;height:54px;margin:-27px 0 0 -27px;
+    border-radius:50%;background:rgba(232,228,220,.30);border:1.5px solid rgba(232,228,220,.55)}
+  #joy .anillo{position:absolute;inset:26px;border-radius:50%;border:1px dashed rgba(232,228,220,.22)}
+
+  .btnT{position:absolute;pointer-events:auto;display:flex;align-items:center;justify-content:center;
+    font-family:var(--mono);letter-spacing:.12em;color:var(--bone);
+    background:rgba(11,14,20,.42);border:1.5px solid var(--edge);backdrop-filter:blur(2px)}
+  #btnSalto{right:calc(26px + env(safe-area-inset-right,0px));
+    bottom:calc(30px + env(safe-area-inset-bottom,0px));
+    width:104px;height:104px;border-radius:50%;font-size:12px;
+    border-color:rgba(255,107,44,.45);background:rgba(255,107,44,.16)}
+  #btnSalto.pulsado{background:rgba(255,107,44,.34)}
+  #btnPausaT{right:calc(16px + env(safe-area-inset-right,0px));
+    top:calc(14px + env(safe-area-inset-top,0px));
+    width:44px;height:44px;border-radius:10px;font-size:15px}
+  #btnCaerT{right:calc(150px + env(safe-area-inset-right,0px));
+    bottom:calc(44px + env(safe-area-inset-bottom,0px));
+    width:62px;height:44px;border-radius:10px;font-size:10px}
+
+  /* pantalla de "gira el móvil" */
+  #gira{position:absolute;inset:0;z-index:40;display:none;flex-direction:column;
+    align-items:center;justify-content:center;gap:18px;text-align:center;
+    background:var(--void);padding:28px}
+  body.tactil.vertical #gira{display:flex}
+  #gira .icono{width:58px;height:92px;border:2.5px solid var(--bone);border-radius:9px;
+    animation:girar 2.2s ease-in-out infinite}
+  #gira h2{font-family:var(--display);font-size:24px;margin:0}
+  #gira p{font-family:var(--mono);font-size:12px;color:var(--ash);letter-spacing:.08em;margin:0;max-width:30ch}
+  @keyframes girar{0%,38%{transform:rotate(0)}62%,100%{transform:rotate(-90deg)}}
+  @media (prefers-reduced-motion:reduce){#gira .icono{animation:none;transform:rotate(-90deg)}}
+
+  /* en pantallas de móvil el HUD de escritorio no cabe */
+  @media (pointer:coarse){
+    .screen{overflow-y:auto}
+    body.jugando .statusbar{display:none}
+    body.jugando #roster{display:none}
+    /* la cinta de altura llegaba hasta abajo y SALTAR le caía encima:
+       en móvil se recorta para dejarle su propio carril a los botones */
+    body.jugando #tape{top:22%;bottom:38%}
+    body.jugando #sala{top:calc(14px + env(safe-area-inset-top,0px));right:74px}
+  }
 
   #hud{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .4s}
   #hud.on{opacity:1}
@@ -190,6 +251,19 @@
 </head>
 <body>
 <div id="scene"></div>
+
+<div id="tactil">
+  <div id="joy"><div class="anillo"></div><div id="joyKnob"></div></div>
+  <button class="btnT" id="btnSalto" type="button">SALTAR</button>
+  <button class="btnT" id="btnCaerT" type="button">CAER</button>
+  <button class="btnT" id="btnPausaT" type="button" aria-label="Pausa">❚❚</button>
+</div>
+
+<div id="gira">
+  <div class="icono"></div>
+  <h2>Gira el móvil</h2>
+  <p>Torre Vertical se juega en horizontal. En vertical no se ve hacia arriba, que es justo donde hay que mirar.</p>
+</div>
 
 <div id="hud">
   <div class="lay readout">
@@ -1188,6 +1262,7 @@ const G = {
   grounded:false, jumpsLeft:2, coyote:0, buffer:0,
   best:0, worst:0, apex:0, elapsed:0, won:false,
   keys:Object.create(null),
+  stick:null,             // {x,z,mag} mientras haya un dedo en el joystick
   ultimaEntrada:0,        // última vez que tocaste teclado o ratón (ver siesta)
   // cámara amortiguada — desacoplada de la posición física
   camX:0, camY:0, camZ:0, camDist:6.2
@@ -1200,6 +1275,11 @@ const GROUND_ACCEL = 58;
 const AIR_ACCEL    = 58 * AV.airControl;
 const FRICTION     = 46 * AV.groundFriction + 10;
 const MAX_SUBSTEP_DIST = 0.06;   // ← metros por subpaso. Esto mata el tirón al aterrizar.
+
+/* Joystick táctil: por debajo de ANDAR no se mueve (zona muerta), en ANDAR
+   va a walkSpeed y en CORRER a runSpeed, interpolando entre medias. */
+const STICK_ANDAR = 0.20, STICK_CORRER = 0.88;
+const MIRA_SENS   = 0.0045;      // radianes por píxel al arrastrar la cámara
 const COYOTE = 0.12, BUFFER = 0.14;
 
 function physicsStep(h){
@@ -1209,6 +1289,14 @@ function physicsStep(h){
   if (k["KeyS"]||k["ArrowDown"])  iz-=1;
   if (k["KeyA"]||k["ArrowLeft"])  ix-=1;
   if (k["KeyD"]||k["ArrowRight"]) ix+=1;
+
+  /* El joystick táctil sustituye a las teclas SOLO mientras hay un dedo
+     puesto y fuera de la zona muerta. Sin dedo, G.stick es null y esta
+     rama no existe: el teclado y el bot de verificación se comportan
+     exactamente igual que antes de que esto existiera. */
+  let analog = -1;
+  if (G.stick){ ix = G.stick.x; iz = G.stick.z; analog = G.stick.mag; }
+
   const mag=Math.hypot(ix,iz);
   if (mag>0){ ix/=mag; iz/=mag; }
 
@@ -1216,8 +1304,14 @@ function physicsStep(h){
   const rx= Math.cos(G.yaw), rz=-Math.sin(G.yaw);
   const wx=fx*iz+rx*ix, wz=fz*iz+rz*ix;
 
-  const andando = !!(k["ShiftLeft"]||k["ShiftRight"]);
-  const target = andando ? AV.walkSpeed : AV.runSpeed;
+  /* Con teclado, andar es un interruptor: Shift o nada. Con el stick es
+     continuo — inclinarlo poco anda, a fondo corre — y eso importa de
+     verdad: el bot midió que en varias cornisas salir ANDANDO era la única
+     forma de llegar. El móvil gana ahí un control que el teclado no da. */
+  const target = analog >= 0
+    ? AV.walkSpeed + (AV.runSpeed - AV.walkSpeed) *
+        clamp((analog - STICK_ANDAR) / (STICK_CORRER - STICK_ANDAR), 0, 1)
+    : ((k["ShiftLeft"]||k["ShiftRight"]) ? AV.walkSpeed : AV.runSpeed);
 
   const accel = G.grounded ? GROUND_ACCEL : AIR_ACCEL;
   if (mag>0){ G.vx += wx*accel*h; G.vz += wz*accel*h; }
@@ -1497,7 +1591,8 @@ function hud(){
   $("worst").textContent=Math.round(G.worst)+" m";
   $("hTime").textContent=fmt(G.elapsed);
   $("hSpeed").textContent=Math.hypot(G.vx,G.vz).toFixed(1)+" m/s";
-  const andando=!!(G.keys["ShiftLeft"]||G.keys["ShiftRight"]);
+  const andando = G.stick ? G.stick.mag < (STICK_ANDAR + STICK_CORRER)/2
+                          : !!(G.keys["ShiftLeft"]||G.keys["ShiftRight"]);
   $("hMode").textContent=andando?"ANDANDO":"CORRIENDO";
   $("hMode").style.color=andando?"var(--ash)":"var(--signal)";
   $("j1").className="pip2"+(G.jumpsLeft>=1?" full":"");
@@ -1977,8 +2072,18 @@ const Perf = { fps:60, peorMs:0, _n:0, _acc:0, _t:0,
   }
 };
 
+let modoPintado = null;
 function loop(now){
   requestAnimationFrame(loop);
+  /* El cuerpo lleva la clase "jugando" para que touch-action y los mandos
+     táctiles solo estén activos en partida — si no, el menú deja de poder
+     hacer scroll en el móvil. Y al salir de partida se suelta el stick:
+     si no, un dedo levantado durante una pausa dejaría al muñeco andando. */
+  if (G.mode !== modoPintado){
+    modoPintado = G.mode;
+    document.body.classList.toggle("jugando", G.mode === "play");
+    if (G.mode !== "play" && typeof soltarStick === "function"){ soltarStick(); Tacto.mira = null; }
+  }
   let dt=(now-last)/1000; last=now;
   Perf.muestra(now, dt*1000);
   if (dt>0.1) dt=0.1;
@@ -2178,6 +2283,7 @@ function toMenu(){
   if (document.exitPointerLock) document.exitPointerLock();
 }
 function lock(){
+  if (ES_TACTIL) return;          // en el móvil no existe, y pedirlo aborta con error
   const el=W.renderer.domElement;
   if (!el.requestPointerLock) return;
   try { const r=el.requestPointerLock(); if (r&&r.catch) r.catch(()=>{}); } catch(e){}
@@ -2227,6 +2333,115 @@ addEventListener("mousedown",e=>{
   if (document.pointerLockElement!==W.renderer.domElement){ dragging=true; lock(); }
 });
 addEventListener("mouseup",()=>{ dragging=false; });
+
+/* ═══ entrada táctil ═══════════════════════════════════════════════════
+   Hasta ahora abrir el juego en el móvil era mirar una torre sin poder
+   hacer nada: el movimiento solo leía teclas y la cámara usaba pointer
+   lock, que en iOS y Android no existe. Esta capa no toca la física.
+   Traduce dedos a exactamente lo mismo que produce el teclado: G.stick
+   para moverse y G.yaw/G.pitch para mirar.                            */
+const ES_TACTIL = (matchMedia("(pointer:coarse)").matches && navigator.maxTouchPoints > 0)
+                  || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+if (ES_TACTIL) document.body.classList.add("tactil");
+
+const RADIO_JOY = 58;                     // px del centro al tope del stick
+const Tacto = { stick:null, mira:null, base:{x:0,y:0} };
+
+function dentroDe(el, t){
+  const r = el.getBoundingClientRect();
+  if (!r.width) return false;             // oculto: no estorba
+  return t.clientX>=r.left && t.clientX<=r.right && t.clientY>=r.top && t.clientY<=r.bottom;
+}
+function pintarJoy(dx, dy, visible){
+  const j = $("joy");
+  j.classList.toggle("on", visible);
+  if (!visible) return;
+  j.style.left = Tacto.base.x + "px";
+  j.style.top  = Tacto.base.y + "px";
+  $("joyKnob").style.transform = "translate(" + dx + "px," + dy + "px)";
+}
+function soltarStick(){ Tacto.stick=null; G.stick=null; pintarJoy(0,0,false); }
+function moverStick(t){
+  let dx = t.clientX - Tacto.base.x, dy = t.clientY - Tacto.base.y;
+  const d = Math.hypot(dx, dy);
+  if (d > RADIO_JOY){ dx *= RADIO_JOY/d; dy *= RADIO_JOY/d; }
+  pintarJoy(dx, dy, true);
+  const mag = Math.min(d, RADIO_JOY) / RADIO_JOY;
+  if (mag < STICK_ANDAR){ G.stick = null; return; }   // zona muerta
+  const n = Math.hypot(dx, dy) || 1;
+  G.stick = { x: dx/n, z: -dy/n, mag };               // arriba en pantalla = adelante
+}
+
+addEventListener("touchstart", e => {
+  if (G.mode !== "play") return;
+  for (const t of e.changedTouches){
+    if (dentroDe($("btnSalto"),t) || dentroDe($("btnPausaT"),t) || dentroDe($("btnCaerT"),t)) continue;
+    if (Tacto.stick === null && t.clientX < innerWidth*0.46){
+      Tacto.stick = t.identifier;
+      Tacto.base = { x:t.clientX, y:t.clientY };      // flotante: nace donde cae el pulgar
+      moverStick(t);
+    } else if (Tacto.mira === null){
+      Tacto.mira = { id:t.identifier, x:t.clientX, y:t.clientY };
+    }
+  }
+  if (e.cancelable) e.preventDefault();
+}, {passive:false});
+
+addEventListener("touchmove", e => {
+  if (G.mode !== "play") return;
+  for (const t of e.changedTouches){
+    if (t.identifier === Tacto.stick) moverStick(t);
+    else if (Tacto.mira && t.identifier === Tacto.mira.id){
+      G.yaw   -= (t.clientX - Tacto.mira.x) * MIRA_SENS;
+      G.pitch -= (t.clientY - Tacto.mira.y) * MIRA_SENS;
+      G.pitch  = clamp(G.pitch, -1.25, 0.95);
+      Tacto.mira.x = t.clientX; Tacto.mira.y = t.clientY;
+    }
+  }
+  if (e.cancelable) e.preventDefault();
+}, {passive:false});
+
+function finTacto(e){
+  for (const t of e.changedTouches){
+    if (t.identifier === Tacto.stick) soltarStick();
+    else if (Tacto.mira && t.identifier === Tacto.mira.id) Tacto.mira = null;
+  }
+}
+addEventListener("touchend", finTacto);
+addEventListener("touchcancel", finTacto);
+
+/* Los botones se manejan aparte para que el dedo que salta no cuente
+   además como arrastre de cámara. Y con touchstart, no con click: el
+   click puede llegar 300 ms tarde y aquí los milisegundos SON el juego. */
+function botonT(id, fn){
+  const el = $(id);
+  el.addEventListener("touchstart", e => {
+    e.preventDefault(); e.stopPropagation();
+    el.classList.add("pulsado"); fn();
+  }, {passive:false});
+  const fin = () => el.classList.remove("pulsado");
+  el.addEventListener("touchend", fin);
+  el.addEventListener("touchcancel", fin);
+  el.addEventListener("click", () => fn());          // mando o ratón sobre la misma UI
+}
+botonT("btnSalto",  () => { if (G.mode==="play"){ G.buffer=BUFFER; doJump(); } });
+botonT("btnCaerT",  () => { if (G.mode==="play") respawn(); });
+botonT("btnPausaT", () => { if (G.mode==="play") pause(); });
+
+/* En vertical no se ve hacia arriba, que es el único sitio donde se mira
+   en este juego. Se pide girar y se pausa mientras tanto. */
+function revisarOrientacion(){
+  if (!ES_TACTIL) return;
+  const vertical = innerHeight > innerWidth;
+  document.body.classList.toggle("vertical", vertical);
+  if (vertical && G.mode === "play") pause();
+}
+addEventListener("resize", revisarOrientacion);
+addEventListener("orientationchange", () => setTimeout(revisarOrientacion, 250));
+/* En iOS la barra de direcciones cambia la altura sin disparar "resize". */
+if (window.visualViewport)
+  visualViewport.addEventListener("resize", () => dispatchEvent(new Event("resize")));
+revisarOrientacion();
 
 $("btnPlay").addEventListener("click",()=>{ Net.cerrar(); limpiarRemotos(); play(); });
 $("btnJoin").addEventListener("click",()=>{

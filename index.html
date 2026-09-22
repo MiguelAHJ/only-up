@@ -2234,25 +2234,44 @@ function spec(k,v,em){
    datos que devuelve buildTower, así que la cámara, las colisiones y el HUD
    funcionan sin enterarse de que esto no es una torre de verdad.
    ═══════════════════════════════════════════════════════════════ */
-const LAB = { modelo:null, grupo:null, alambres:null, verAlambres:true, aviso:"" };
+const LAB = { modelos:{}, grupo:null, alambres:null, verAlambres:true, aviso:"" };
 
-/* Se carga una vez y se clona. El origen se deja en el CENTRO DE LA BASE
-   para poder colocar cada bidón por donde se apoya, que es como se piensa
-   al montar un nivel. */
-function cargarBidon(cb){
-  if (LAB.modelo) return cb(LAB.modelo);
+/* Cada prop con sus colisionadores en el sistema del propio modelo: centro
+   de la caja envolvente en x=0,z=0 y base en y=0.
+   Los números de la silla NO son a ojo. Salen de lanzar rayos hacia abajo
+   sobre una rejilla de 1 cm y quedarse con la superficie de arriba, que es
+   donde un jugador se puede parar (la herramienta está en el banco de
+   pruebas, fuera del repo). El asiento salió plano al milímetro: del
+   percentil 10 al 90 hay 0,0 cm de desnivel. */
+const PROPS = {
+  bidon: { ruta:"modelos/barril/Barrel_01_1k.gltf" },
+  silla: { ruta:"modelos/silla/painted_wooden_chair_02_1k.gltf",
+           asiento: { c:[0, 0.535,  0.060], t:[0.570, 0.100, 0.532] },
+           respaldo:{ c:[0, 0.924, -0.261], t:[0.629, 0.679, 0.131] } }
+};
+
+function cargarProps(cb){
+  const nombres = Object.keys(PROPS).filter(n => !LAB.modelos[n]);
+  if (!nombres.length) return cb();
   if (typeof THREE.GLTFLoader !== "function"){
-    LAB.aviso = "el cargador de glTF no llegó"; return cb(null);
+    LAB.aviso = "el cargador de glTF no llegó"; return cb();
   }
-  new THREE.GLTFLoader().load("modelos/barril/Barrel_01_1k.gltf", (g) => {
+  const cargador = new THREE.GLTFLoader();
+  const fallos = [];
+  let quedan = nombres.length;
+  const listo = () => { if (--quedan === 0){
+    LAB.aviso = fallos.length ? "no cargó: " + fallos.join(", ") + " · ¿sirve /modelos/?" : "";
+    cb();
+  }};
+  for (const n of nombres) cargador.load(PROPS[n].ruta, (g) => {
     const m = g.scene;
-    /* Este juego renderiza con el outputEncoding por defecto (lineal), y
+    /* Este juego renderiza con el outputEncoding por defecto (lineal) y
        toda su paleta está ajustada a eso. GLTFLoader marca la textura de
-       color como sRGB, así que three la des-gamma al leerla y no la vuelve
-       a aplicar al escribir: el bidón salía oscuro y lavado. Se le pone
+       color como sRGB: three la des-gamma al leerla y no la vuelve a
+       aplicar al escribir, y el prop sale oscuro y lavado. Se le pone
        encoding lineal para que entre en la misma tubería que el resto.
-       (Lo correcto de verdad sería poner el renderer en sRGB, pero eso
-       cambia el aspecto del juego ENTERO y es otra decisión.) */
+       (Lo correcto sería poner el renderer en sRGB, pero eso cambia el
+       aspecto del juego ENTERO y es otra decisión.) */
     m.traverse(o => {
       if (!o.isMesh || !o.material) return;
       for (const mat of (Array.isArray(o.material) ? o.material : [o.material])){
@@ -2263,53 +2282,82 @@ function cargarBidon(cb){
     m.updateMatrixWorld(true);
     const bb = new THREE.Box3().setFromObject(m);
     const d = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3());
-    m.position.set(-c.x, -bb.min.y, -c.z);
+    m.position.set(-c.x, -bb.min.y, -c.z);   // base al suelo, centrado en x,z
     const cont = new THREE.Group(); cont.add(m);
-    LAB.aviso = ""; LAB.modelo = { obj:cont, d };
-    cb(LAB.modelo);
-  }, undefined, (e) => {
-    console.error("[lab] no cargó el bidón:", e);
-    LAB.aviso = "el modelo no cargó · ¿sirve el servidor /modelos/?";
-    cb(null);
-  });
+    LAB.modelos[n] = { obj:cont, d };
+    listo();
+  }, undefined, (e) => { console.error("[lab] no cargó " + n + ":", e); fallos.push(n); listo(); });
 }
 
-function montarLab(mod){
-  // medidas tomadas del propio modelo; si no cargó, las del catálogo
-  const D = mod ? mod.d : new THREE.Vector3(0.563, 0.880, 0.563);
-  const R = D.x/2;
+function montarLab(){
+  const bidon = LAB.modelos.bidon, silla = LAB.modelos.silla;
+  const B = bidon ? bidon.d : new THREE.Vector3(0.563, 0.880, 0.563);
+  const S = silla ? silla.d : new THREE.Vector3(0.639, 1.264, 0.662);
+  const R = B.x/2;
 
-  const solids = [], visuals = [], bidones = [];
+  const solids = [], visuals = [], props = [];
   const caja = (cx,cy,cz,sx,sy,sz,mat,choca) => {
     if (mat)   visuals.push({cx,cy,cz,sx,sy,sz,yaw:0,mat,shape:"box"});
     if (choca) solids.push({x:cx,y:cy,z:cz,hw:sx/2,hh:sy/2,hd:sz/2,yaw:0});
   };
   const placa = (x,mat) => caja(x,0.012,0, 3.0,0.024,3.0, mat, false);
-  const pon   = (x,y,tumbado) => bidones.push({x,y,tumbado});
+  const pon   = (tipo,x,y,tumbado) => props.push({tipo,x,y,tumbado});
+  // coloca una caja del PROPS relativa a la base del prop en (x, y)
+  const deProp = (x, y, b) => caja(x + b.c[0], y + b.c[1], b.c[2], b.t[0], b.t[1], b.t[2], null, true);
 
-  caja(14,-0.5,0, 42,1,16, "hormigon", true);                    // suelo
+  caja(24,-0.5,0, 68,1,16, "hormigon", true);                    // suelo
 
-  // 1 · DE PIE — la caja coincide con el objeto, no se nota nada
-  placa(4,"galv");     pon(4,0,false);
-  caja(4, D.y/2, 0, D.x, D.y, D.z, null, true);
+  // ── BIDONES ─────────────────────────────────────────────────────────
+  // 1 · de pie: la caja coincide con el objeto, no se nota nada
+  placa(4,"galv");     pon("bidon",4,0,false);
+  caja(4, B.y/2, 0, B.x, B.y, B.z, null, true);
 
-  // 2 · TUMBADO con la caja ENVOLVENTE — aquí se flota hasta 19 cm
-  placa(9,"oxido");    pon(9,0,true);
-  caja(9, R, 0, D.x, D.x, D.y, null, true);
+  // 2 · tumbado con la caja ENVOLVENTE: se flota hasta 19 cm en los flancos
+  placa(9,"oxido");    pon("bidon",9,0,true);
+  caja(9, R, 0, B.x, B.x, B.y, null, true);
 
-  // 3 · TUMBADO con la LOSA INSCRITA — pisas la chapa que ves
-  placa(14,"pintado"); pon(14,0,true);
-  const LOSA = 0.24, GRUESO = 0.10;
-  caja(14, D.x - GRUESO/2, 0, LOSA, GRUESO, D.y, null, true);
+  // 3 · tumbado con la LOSA INSCRITA: pisas la chapa que ves
+  placa(14,"pintado"); pon("bidon",14,0,true);
+  caja(14, B.x - 0.05, 0, 0.24, 0.10, B.y, null, true);
 
-  // 4 · PILA de tres
+  // 4 · pila de tres
   placa(19,"galv");
-  for (let i=0;i<3;i++){ pon(19, i*D.y, false);
-    caja(19, i*D.y + D.y/2, 0, D.x, D.y, D.z, null, true); }
+  for (let i=0;i<3;i++){ pon("bidon",19, i*B.y, false);
+    caja(19, i*B.y + B.y/2, 0, B.x, B.y, B.z, null, true); }
 
-  // 5 · DOS SEPARADOS 3,5 m para saltar entre ellos
-  for (const x of [25, 28.5]){ placa(x,"pintado"); pon(x,0,false);
-    caja(x, D.y/2, 0, D.x, D.y, D.z, null, true); }
+  // 5 · dos separados 3,5 m para saltar entre ellos
+  for (const x of [25, 28.5]){ placa(x,"pintado"); pon("bidon",x,0,false);
+    caja(x, B.y/2, 0, B.x, B.y, B.z, null, true); }
+
+  // ── SILLAS ──────────────────────────────────────────────────────────
+  // 6 · UNA sola caja: el techo queda en 1,264 y el asiento está en 0,585.
+  //     Son 68 cm de aire. Es lo que pasa por tratar un objeto hueco como
+  //     un bloque, y por eso las sillas estaban en mi lista negra.
+  placa(34,"oxido");   pon("silla",34,0,false);
+  caja(34, S.y/2, 0, S.x, S.y, S.z, null, true);
+
+  /* 7 · DOS cajas: asiento + respaldo, las dos sólidas. Es lo honesto,
+     pero medido tiene una consecuencia que no se ve venir: la planta del
+     jugador mide 0,70 m y el asiento solo 0,53 de fondo, así que cayendo
+     al centro el pie pisa TAMBIÉN el respaldo y te quedas de pie encima de
+     él, a 1,264 m. Para sentarte de verdad hay que caer por delante del
+     respaldo: medido, la franja va de z=0,13 a z=0,65 — 52 cm, más de lo
+     que parece, porque media planta puede volar por delante del borde. */
+  placa(39,"galv");    pon("silla",39,0,false);
+  deProp(39, 0, PROPS.silla.asiento);
+  deProp(39, 0, PROPS.silla.respaldo);
+
+  /* 8 · SOLO el asiento; el respaldo queda de adorno y se atraviesa. La
+     silla pasa a ser lo que interesa en un juego de escalar: una
+     plataforma limpia de 0,57 × 0,53 a 0,585 m de altura. */
+  placa(44,"pintado"); pon("silla",44,0,false);
+  deProp(44, 0, PROPS.silla.asiento);
+
+  // 9 · dos de esas, para saltar de asiento a asiento
+  for (const x of [49, 51.6]){
+    placa(x,"oxido"); pon("silla",x,0,false);
+    deProp(x, 0, PROPS.silla.asiento);
+  }
 
   G.tower = indexarTorre({ solids, visuals, apoyos:[],
     summit:{x:0,y:99999,z:0},                     // inalcanzable: aquí no se gana
@@ -2317,10 +2365,12 @@ function montarLab(mod){
     altura:20, informe:{piezas:solids.length} });
   buildMeshes(G.tower);
 
-  // los bidones los pinta el modelo, no un cubo
+  // los props los pinta el modelo, no un cubo
   if (LAB.grupo) W.scene.remove(LAB.grupo);
   LAB.grupo = new THREE.Group();
-  if (mod) for (const b of bidones){
+  for (const b of props){
+    const mod = LAB.modelos[b.tipo];
+    if (!mod) continue;
     const c = mod.obj.clone(true);
     if (b.tumbado) c.rotation.x = Math.PI/2;
     /* Se recoloca midiendo la caja YA girada en vez de calcular el
@@ -2353,16 +2403,19 @@ function montarLab(mod){
 }
 
 function pintarLab(){
-  const tecla = ES_TACTIL ? '<span class="tec">toca la leyenda</span>'
-                          : '<span class="tec">K</span>';
+  const tecla = ES_TACTIL ? '<span class="tec">toca aquí</span>' : '<span class="tec">K</span>';
+  const n = (i) => '<span class="n">' + i + '</span> ';
   $("labinfo").innerHTML =
     (LAB.aviso ? '<span class="mal">· ' + LAB.aviso + ' ·</span><br>' : '') +
-    '<b>LABORATORIO</b> &nbsp;·&nbsp; ' +
-    '<span class="n">1</span> de pie &nbsp; ' +
-    '<span class="n">2</span> tumbado <span class="mal">caja envolvente</span> &nbsp; ' +
-    '<span class="n">3</span> tumbado <span class="bien">losa inscrita</span> &nbsp; ' +
-    '<span class="n">4</span> pila &nbsp; ' +
-    '<span class="n">5</span> salto de 3,5 m<br>' +
+    '<b>LABORATORIO</b> &nbsp;·&nbsp; BIDONES &nbsp; ' +
+    n(1) + 'de pie &nbsp; ' +
+    n(2) + 'tumbado <span class="mal">caja envolvente</span> &nbsp; ' +
+    n(3) + 'tumbado <span class="bien">losa inscrita</span> &nbsp; ' +
+    n(4) + 'pila &nbsp; ' + n(5) + 'salto de 3,5 m<br>' +
+    'SILLAS &nbsp; ' + n(6) + '<span class="mal">una caja</span> · 68 cm de aire &nbsp; ' +
+    n(7) + 'asiento + respaldo · <span class="mal">acabas encima del respaldo</span> &nbsp; ' +
+    n(8) + '<span class="bien">solo asiento</span> &nbsp; ' +
+    n(9) + 'salto de asiento a asiento<br>' +
     tecla + ' alambres de colisión: <b>' + (LAB.verAlambres ? "sí" : "no") + '</b>' +
     ' &nbsp;·&nbsp; <span class="tec">Ctrl+Alt+B</span> salir';
 }
@@ -2374,8 +2427,8 @@ function abrirLab(){
   $("menu").hidden = true; $("pause").hidden = true; $("win").hidden = true;
   $("labinfo").hidden = false;
   $("sala").hidden = true;
-  cargarBidon((mod) => {
-    montarLab(mod);
+  cargarProps(() => {
+    montarLab();
     G.mode="play"; G.elapsed=0; G.best=0; G.worst=0; G.won=false;
     $("hud").classList.add("on");
     lock();

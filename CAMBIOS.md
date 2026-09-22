@@ -1,3 +1,98 @@
+# Cambios — 22 de septiembre de 2026 (undécimo lote): la silla, y cómo se decide dónde van las cajas
+
+Segundo prop en el laboratorio: `painted_wooden_chair_02`, **1.246
+triángulos**, 0,639 × 1,264 × 0,662 m. Y con él, una forma de decidir los
+colisionadores que no depende de mirar el modelo y opinar.
+
+## Primero: me tengo que desdecir
+
+En el catálogo de props puse **"sillas (todas)"** en la lista negra, con
+este motivo: *"patas, respaldo y asiento a distintas alturas; una caja las
+vuelve un cubo invisible"*. Eso es cierto de **una** caja y falso como
+veredicto sobre el objeto.
+
+Lo que midió el banco de colisionadores compuestos fue que las cajas
+múltiples ganan cuando la forma es **plana a trozos**. Una silla es
+exactamente eso: una tabla horizontal y un panel vertical. Con dos cajas no
+solo sirve — es mejor prop que el bidón, porque su superficie útil es
+plana de verdad y la del bidón es curva.
+
+## Cómo se sacaron los números: rayos, no criterio
+
+En vez de abrir el modelo y estimar, se lanzan rayos hacia abajo sobre una
+rejilla de 1 cm y se guarda la **primera** superficie que encuentra cada
+uno. Eso da un mapa de alturas visto desde arriba, y las superficies donde
+un jugador se puede parar salen como mesetas del mapa:
+
+```
+ALTURA DE LA SUPERFICIE DE ARRIBA · área por franja de 2 cm
+  1.24 m      170 cm²  ███
+  0.92 m      156 cm²  ██
+  0.74 m       50 cm²  █
+  0.58 m     3086 cm²  ██████████████████████████████████████████████
+```
+
+Una meseta se come todo lo demás. Y **el asiento es plano al milímetro**:
+del percentil 10 al 90 hay **0,0 cm** de desnivel. El primer informe decía
+12 cm de grosor y era mi agrupación de franjas tragándose el borde
+delantero; los percentiles lo desmintieron.
+
+De ahí salen las dos cajas, calculadas por la máquina en el mismo sistema
+de coordenadas que usa el laboratorio para que yo no tenga que restar nada
+a mano:
+
+| | centro | tamaño | techo |
+|---|---|---|---|
+| asiento | `[0, 0.535, 0.060]` | `[0.570, 0.100, 0.532]` | 0,585 m |
+| respaldo | `[0, 0.924, -0.261]` | `[0.629, 0.679, 0.131]` | 1,264 m |
+
+Con **una sola** caja el techo queda en 1,264 y el asiento está en 0,585:
+**68 cm de aire**. Eso es lo que hay en la estación 6 para verlo.
+
+## Y aquí la consecuencia que no vi venir
+
+Con el asiento y el respaldo sólidos (estación 7), cayendo al centro de la
+silla **no te sientas: te quedas de pie encima del respaldo**, a 1,264 m.
+
+El motivo es el mismo que con el bidón tumbado: la planta del jugador mide
+**0,70 m** y el fondo del asiento solo **0,53**. El pie siempre pisa
+también el respaldo, y en una colisión por cajas te apoyas en lo más alto
+que toques.
+
+Medido, la franja donde sí te sientas va de **z=0,13 a z=0,65 — 52 cm**.
+Empieza donde el pie deja de tocar el respaldo y acaba bastante por delante
+del borde del asiento, porque media planta puede volar. Yo había calculado
+17 cm a ojo; el barrido dijo 52.
+
+Por eso el laboratorio tiene las dos versiones:
+
+- **7 · asiento + respaldo** — honesto, y la silla se comporta como una
+  plataforma alta de 1,264 m con una repisa baja a la que solo se llega
+  por delante.
+- **8 · solo asiento** — el respaldo queda de adorno y se atraviesa. La
+  silla pasa a ser lo que interesa en un juego de escalar: una plataforma
+  limpia de 0,57 × 0,53 a 0,585 m.
+- **9 · dos de esas** separadas 2,6 m, para saltar de asiento a asiento.
+
+Cuál de las dos va a la torre es decisión de diseño, no técnica. Mi voto es
+la 8: el respaldo sólido hace que la silla se comporte distinto según por
+dónde llegues, y eso en un juego de precisión se siente injusto.
+
+## Peso
+
+La silla son **2,4 MB** de texturas a 1k, casi cuatro veces el bidón
+(692 KB). Para el laboratorio da igual; para la torre, no. Cuando llegue el
+momento hay que pasar a WebP y bajar a 512 px.
+
+## Otras dos veces que me equivoqué en la prueba
+
+- Conté 12 props y 15 alambres; son 13 y 14.
+- El barrido de la franja útil llegaba solo hasta z=0,5 y devolvió "36 cm".
+  Ampliado hasta 0,9, la respuesta real es 52 cm. Un barrido que no llega
+  al final mide el barrido, no el objeto.
+
+---
+
 # Cambios — 22 de septiembre de 2026 (décimo lote): laboratorio oculto y el primer modelo
 
 Un nivel de pruebas que no sale en ningún menú, con el Barrel_01 de Poly

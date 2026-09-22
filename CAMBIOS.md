@@ -1,3 +1,166 @@
+# Cambios — 22 de septiembre de 2026 (decimoctavo lote): color de jugador y nueve gestos
+
+El robot del laboratorio lleva ahora **el color que le toca a cada jugador**, y
+con las cifras `1`–`9` hace nueve gestos que ya venían dentro del archivo y
+que no usaba nadie.
+
+## El color: tres materiales y ninguna textura
+
+Abriendo el modelo por dentro sale una estructura que no podía venir mejor:
+
+| material | color de fábrica | dónde |
+|---|---|---|
+| `Main` | `#964a09` | **12 mallas**: torso, brazos, piernas, casco |
+| `Grey` | `#5f5e55` | 6 mallas: pies, placas, remaches |
+| `Black` | `#0b0b0b` | 1 malla: **los ojos** |
+
+Así que el color del jugador es cambiar **uno de los tres**. Sin texturas,
+sin UV, sin editar imágenes. Los ojos y el metal se quedan como están, que es
+justo lo que se quiere: si se tiñera todo, el robot sería una mancha de un
+solo color con dos agujeros del mismo color.
+
+Y la fontanería ya estaba puesta desde hace lotes: `PALETA` tiene ocho
+colores y a cada jugador se le asigna uno con el hash de su nombre. Ahora
+`colorJugador()` tiñe el cilindro **y** el robot, así que cada amigo llevaría
+el suyo sin decidir nada nuevo. En el lab, `Q` rueda por los ocho.
+
+### Un detalle de color que parece contradictorio y no lo es
+
+El color que trae el modelo **sí** se convierte (`convertLinearToSRGB`) y el
+hex de la paleta **no**. No es un descuido:
+
+- glTF guarda `baseColorFactor` en **lineal**, y este juego escribe el
+  framebuffer sin corregir, así que ese número hay que pasarlo a sRGB o el
+  robot sale apagado. Es el mismo problema que dejó el bidón negro, por otra
+  puerta.
+- El hex de la paleta ya **es** sRGB: se escribe tal cual y sale exactamente
+  el color que elegiste.
+
+### Clonar comparte los materiales
+
+three.js **comparte los materiales al clonar una escena**. El día que haya un
+robot por cada amigo, teñir a uno los teñiría a los ocho. Por eso el modelo
+individualiza sus materiales nada más cargar: cuesta 7 objetos por personaje.
+
+Esto no es una precaución teórica. Hay una prueba que hace justo lo que no se
+debe —clonar y teñir sin individualizar— y **exige que el original se
+contagie**. Si algún día three.js cambiara ese comportamiento, la prueba se
+pondría roja y el aviso del código se podría borrar. Quien clone este modelo
+en el futuro tiene que volver a individualizar.
+
+## Los nueve gestos
+
+Estaban dentro del `.glb` desde el principio. **No añaden un byte** a la
+descarga.
+
+| tecla | gesto | cómo termina |
+|---|---|---|
+| `1` | saludar | solo |
+| `2` | pulgar arriba | solo |
+| `3` | sí | solo |
+| `4` | no | solo |
+| `5` | baile | se repite hasta que te muevas |
+| `6` | puñetazo | solo |
+| `7` | sentarse | se queda sentado |
+| `8` | levantarse | solo |
+| `9` | tumbarse | se queda tumbado |
+
+Tres maneras de terminar porque no todos los gestos son iguales: el baile se
+repite, sentarse se queda en el último fotograma (sigues sentado hasta que
+decides levantarte) y los demás se reproducen y devuelven el control.
+
+`8 · levantarse` dura 0,42 s y suelto no dice nada —ya estás de pie—, pero es
+la pareja de `7` y estando sentado es lo que toca.
+
+### Reglas, y por qué
+
+**Sólo con los pies en el suelo y parado.** En el aire o corriendo pelearía
+con la animación de locomoción y se vería como un espasmo. Más importante:
+este es un juego de saltos finos y ninguna tecla puede robarte el control a
+media caída.
+
+**Se corta solo en cuanto te mueves o saltas.** No hay que cancelar nada a
+mano: echas a andar y el gesto desaparece.
+
+**No queda peso suelto.** Los gestos que no suenan se apagan siempre, también
+mientras corres. Sin eso, el peso que le quedó a uno se queda sumándose para
+siempre y el robot acaba corriendo con el brazo levantado el resto de la
+partida. Hay una prueba que corre 90 fotogramas después de cortar un gesto y
+exige que no quede ni un 2 % de peso en ninguno de los nueve.
+
+**Mantener la tecla no reinicia.** El navegador repite el `keydown` mientras
+la tienes apretada; sin guardia, el saludo se reiniciaría sesenta veces por
+segundo y se vería como un tic.
+
+**Al salir del lab se corta.** Salir bailando dejaba el gesto puesto en
+memoria y al volver a entrar el robot seguía bailando sin tocar una tecla.
+
+## Lo que cuesta
+
+Nueve acciones más en el mezclador: **0,032 ms por fotograma**, o sea 0,51 ms
+con dieciséis jugadores. No se nota. Las llamadas de dibujo no cambian: son
+las mismas mallas moviéndose de otra forma.
+
+## Un error mío, y quién lo pilló
+
+Los tres bancos posaban al jugador así:
+
+```js
+G.py = 3;
+for (let i = 0; i < 900 && !G.grounded; i++) physicsStep(1/240);
+```
+
+Si `grounded` venía en **true** del fotograma anterior —y venía—, el bucle no
+daba **ni un paso**: el jugador se quedaba a 3 m de altura y todo lo que se
+midiera después medía a alguien flotando, con `grounded` diciendo que sí. La
+comprobación «se posa en la losa» pasaba, porque preguntaba por la misma
+bandera obsoleta.
+
+No lo pilló ninguna prueba: lo pilló **una captura de pantalla**, donde el
+robot se veía claramente en el aire con su sombra medio metro por debajo. Se
+arregla poniendo `grounded = false` antes del bucle.
+
+La otra: la prueba de los gestos muestreaba a los 30 fotogramas (medio
+segundo) y `levantarse` dura 0,42 s — ya se había acabado y estaba a mitad de
+fundido de vuelta. Medía el final, no el gesto. Ahora muestrea a 18.
+
+## Cómo se ha comprobado
+
+`test/gestos.js`: 33 comprobaciones — el color inicial, que teñir no toca los
+ojos, que `Q` da la vuelta a los ocho sin repetir, los nueve gestos con su
+peso, las tres formas de terminar, que moverse y saltar cortan, que en el
+aire y corriendo no se puede empezar, que no queda peso suelto, que la tecla
+mantenida no reinicia, el coste, y que salir del lab lo limpia todo.
+
+Rompiendo el juego a propósito seis veces:
+
+| lo que se rompió | fallos |
+|---|---|
+| teñir todo, también los ojos | 1 |
+| que moverse no corte el gesto | 3 |
+| no limpiar el gesto al salir del lab | 2 |
+| dejar de apagar los gestos que no suenan | 1 |
+| quitar el guardia de tecla mantenida | 1 |
+| permitir gestos en el aire y corriendo | 2 |
+
+`personaje.js`, `lab.js`, `minitorre.js` y `despliegue.js` siguen en verde.
+
+## Lo que NO se ha hecho
+
+- **Los gestos sólo están en el laboratorio**, porque el robot sólo está ahí.
+- **Tus amigos no los verían.** El protocolo manda `x, y, z, ry` y nada más:
+  aunque el robot estuviera en el juego, saludar no llegaría al otro lado.
+  Es el mismo byte de estado que falta para animarlos, y para un gesto —que
+  existe precisamente para que lo vea otro— importa más todavía.
+- **Las tres expresiones de la cara** (`Angry`, `Surprised`, `Sad`) siguen sin
+  usarse. Están ahí como morph targets, listas.
+
+## Archivos tocados
+
+- `index.html` — el teñido, los nueve gestos y sus reglas, el rótulo del lab
+
+---
+
 # Cambios — 22 de septiembre de 2026 (decimoséptimo lote): un personaje de verdad en el laboratorio
 
 El muñeco del juego es un cilindro con una esfera encima y se desliza sin

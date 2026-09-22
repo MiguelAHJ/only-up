@@ -2461,11 +2461,34 @@ const TALLA = {
   caer:   [1.53, 2.30, 1.43],
 };
 
+/* Los gestos. Son NUEVE clips que ya venían dentro del archivo y que no
+   usaba nadie: no añaden un byte a la descarga. En un juego donde tus
+   amigos te esperan en una cornisa mirando cómo te caes, poder saludar sale
+   prácticamente gratis.
+
+   Tres maneras de terminar, porque no todos los gestos son iguales:
+   · unaVez   — se reproduce y se vuelve solo a lo que estuvieras haciendo
+   · bucle    — se repite mientras no te muevas (el baile)
+   · quedarse — se queda en el último fotograma (sentado sigue sentado) */
+const GESTOS = [
+  { tecla:"Digit1", clip:"Wave",     nombre:"saludar",    modo:"unaVez"   },
+  { tecla:"Digit2", clip:"ThumbsUp", nombre:"pulgar",     modo:"unaVez"   },
+  { tecla:"Digit3", clip:"Yes",      nombre:"sí",         modo:"unaVez"   },
+  { tecla:"Digit4", clip:"No",       nombre:"no",         modo:"unaVez"   },
+  { tecla:"Digit5", clip:"Dance",    nombre:"baile",      modo:"bucle"    },
+  { tecla:"Digit6", clip:"Punch",    nombre:"puñetazo",   modo:"unaVez"   },
+  { tecla:"Digit7", clip:"Sitting",  nombre:"sentarse",   modo:"quedarse" },
+  /* "levantarse" dura 0,42 s y es la pareja de "sentarse": suelto no dice
+     nada —ya estás de pie—, pero estando sentado es lo que toca. */
+  { tecla:"Digit8", clip:"Standing", nombre:"levantarse", modo:"unaVez"   },
+  { tecla:"Digit9", clip:"Death",    nombre:"tumbarse",   modo:"quedarse" },
+];
+
 const PERSONA = {
   ruta: "modelos/robot/RobotExpressive.glb",
-  raiz: null, mixer: null, acc: {}, caja: null,
+  raiz: null, mixer: null, acc: {}, accGesto: {}, caja: null,
   activo: false, intentado: false, fallo: "",
-  estado: "quieto", giro: 0,
+  estado: "quieto", giro: 0, gesto: null, tinte: null,
 };
 
 function cargarPersona(cb){
@@ -2480,13 +2503,20 @@ function cargarPersona(cb){
        si fuera sRGB y el robot sale apagado. convertLinearToSRGB() deja el
        número que hay que escribir para que se VEA el color correcto. Es el
        mismo problema del bidón por otra puerta. */
+    /* Los materiales se hacen PROPIOS de esta copia antes de tocarlos.
+       three.js comparte los materiales al clonar una escena —comprobado—,
+       así que el día que haya un robot por cada amigo, teñir a uno los
+       teñiría a los ocho. Cuesta 7 objetos por personaje: nada.
+       Quien clone este modelo en el futuro tiene que volver a hacer esto. */
     m.traverse(o => {
       if (!o.isMesh) return;
       o.frustumCulled = false;            // sus huesos lo sacan de su caja original
+      o.material = Array.isArray(o.material)
+        ? o.material.map(x => x.clone()) : o.material.clone();
       for (const mat of (Array.isArray(o.material) ? o.material : [o.material])){
-        if (!mat || mat.__yaVa) continue;
+        if (!mat) continue;
         if (mat.color) mat.color.convertLinearToSRGB();
-        mat.__yaVa = true; mat.needsUpdate = true;
+        mat.needsUpdate = true;
       }
     });
 
@@ -2579,7 +2609,20 @@ function cargarPersona(cb){
       doble:  unaVez("WalkJump"),
       caer:   accionCaer,
     };
+    /* Los nueve gestos, cada uno con su acción. Aquí no hay el problema de
+       la acción compartida que tuvo "caer": son nueve clips distintos. */
+    PERSONA.accGesto = {};
+    for (const g of GESTOS){
+      const c2 = clip(g.clip);
+      if (!c2) continue;
+      const a = mx.clipAction(c2);
+      a.setLoop(g.modo === "bucle" ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
+      a.clampWhenFinished = (g.modo !== "bucle");
+      a.play(); a.setEffectiveWeight(0);
+      PERSONA.accGesto[g.clip] = a;
+    }
     if (!PERSONA.acc.quieto || !PERSONA.acc.correr) PERSONA.fallo = "faltan clips";
+    tintarPersona(G.color);       // el color que ya le tocó por su nombre
     cb();
   }, undefined, (e) => {
     console.error("[lab] no cargó el personaje:", e);
@@ -2602,9 +2645,61 @@ function rehacerCajaPersona(){
   W.scene.add(l);
 }
 
+/* El color del jugador, en el robot.
+   El modelo tiene TRES materiales y ninguna textura: "Main" es el cuerpo
+   entero (12 mallas), "Grey" el metal y "Black" los ojos. Así que el color
+   del jugador es literalmente cambiar uno de los tres, sin tocar imágenes.
+
+   El hex de la paleta se pone DIRECTO, sin convertir: ya es sRGB y este
+   juego escribe el color tal cual al framebuffer, así que sale exactamente
+   el color que elegiste. (El color que traía el modelo sí hubo que
+   convertirlo, porque glTF lo guarda en lineal. No es lo mismo.) */
+function tintarPersona(hex){
+  if (!PERSONA.raiz || !hex) return;
+  PERSONA.tinte = hex;
+  PERSONA.raiz.traverse(o => {
+    if (!o.isMesh) return;
+    for (const m of (Array.isArray(o.material) ? o.material : [o.material]))
+      if (m && m.name === "Main") m.color.set(hex);
+  });
+}
+
+function gestoPorTecla(code){ return GESTOS.find(g => g.tecla === code) || null; }
+
+/* Un gesto sólo se hace con los pies en el suelo y parado. Hacerlo en el
+   aire o corriendo pelearía con la animación de locomoción y se vería como
+   un espasmo; además, un juego de saltos finos no puede permitirse que una
+   tecla te robe el control a media caída. */
+function iniciarGesto(g){
+  if (!PERSONA.activo || !g) return false;
+  const a = PERSONA.accGesto[g.clip];
+  if (!a || !G.grounded || Math.hypot(G.vx, G.vz) > 0.35) return false;
+  PERSONA.gesto = g;
+  a.reset(); a.play();
+  return true;
+}
+function pararGesto(){ PERSONA.gesto = null; }
+
+/* Se corta solo: en cuanto te mueves, saltas o el clip se acaba. Los de
+   modo "bucle" y "quedarse" no se acaban nunca por su cuenta — esos los
+   corta el movimiento, que es justo lo que se quiere: te quedas sentado
+   hasta que decides levantarte. */
+function revisarGesto(){
+  const g = PERSONA.gesto;
+  if (!g) return;
+  const a = PERSONA.accGesto[g.clip];
+  if (!a){ pararGesto(); return; }
+  if (!G.grounded || Math.hypot(G.vx, G.vz) > 0.35){ pararGesto(); return; }
+  if (g.modo === "unaVez"){
+    const dur = a.getClip().duration;
+    if (a.time >= dur - 1e-3) pararGesto();
+  }
+}
+
 /* Qué animación toca. Sale ENTERA del estado que el juego ya lleva: no hace
    falta inventar nada ni guardar banderas nuevas. */
 function estadoPersona(){
+  if (PERSONA.gesto) return "gesto";
   const v = Math.hypot(G.vx, G.vz);
   if (!G.grounded){
     if (G.vy > 0.6) return G.jumpsLeft <= 0 ? "doble" : "salto";
@@ -2618,9 +2713,21 @@ function actualizarPersona(dt){
   if (!PERSONA.raiz || !PERSONA.mixer) return;
   const A = PERSONA.acc;
   const v = Math.hypot(G.vx, G.vz);
+  revisarGesto();
   const nuevo = estadoPersona();
 
-  if (nuevo === "sueloMezcla"){
+  /* Los gestos que no están sonando se apagan siempre, también mientras
+     corres: si no, el peso que le quedó a uno se queda ahí sumándose para
+     siempre y el robot anda con el brazo levantado. */
+  for (const g of GESTOS){
+    const a = PERSONA.accGesto[g.clip];
+    if (a) peso(a, (PERSONA.gesto && PERSONA.gesto.clip === g.clip) ? 1 : 0, dt);
+  }
+
+  if (nuevo === "gesto"){
+    for (const k of ["quieto","andar","correr","salto","doble","caer"]) peso(A[k], 0, dt);
+    PERSONA.estado = "gesto";
+  } else if (nuevo === "sueloMezcla"){
     /* Mezcla continua quieto → andar → correr según la velocidad real.
        Sin esto, pasar de andar a correr es un salto de fotograma que se ve
        como un tirón; con el stick analógico se notaría todo el rato. */
@@ -2962,18 +3069,27 @@ function filaPersona(){
   };
   const nombres = { quieto:"quieto", andar:"andando", correr:"corriendo",
                     salto:"saltando", doble:"doble salto", caer:"cayendo" };
+  const ahora = PERSONA.gesto ? PERSONA.gesto.nombre
+                              : (nombres[PERSONA.estado] || PERSONA.estado);
+  if (!PERSONA.activo)
+    return '<br><b>PERSONAJE</b> <span class="tec">P</span> cilindro' +
+           ' &nbsp;·&nbsp; ahora: <b>' + ahora + '</b>';
+  const gestos = GESTOS.map(g =>
+    '<span class="tec">' + g.tecla.replace("Digit","") + '</span>' +
+    (PERSONA.gesto === g ? '<b>' + g.nombre + '</b>' : g.nombre)).join(" &nbsp; ");
   return '<br><b>PERSONAJE</b> ' +
-    '<span class="tec">P</span> ' + (PERSONA.activo ? "robot" : "cilindro") +
-    ' &nbsp;·&nbsp; ahora: <b>' + (nombres[PERSONA.estado] || PERSONA.estado) + '</b>' +
-    (PERSONA.activo
-      ? ' &nbsp;·&nbsp; él ocupa ' + cmp(t[0]) + ' × ' + cmp(t[1]) + ' × ' + cmp(t[2]) +
-        ' &nbsp;·&nbsp; la caja mide <b>' + (HX*2).toFixed(2) + ' × ' + (HY*2).toFixed(2) +
-        ' × ' + (HZ*2).toFixed(2) + '</b> m<br>' +
-        'caja: <span class="tec">Z</span><span class="tec">X</span> ancho &nbsp; ' +
-        '<span class="tec">C</span><span class="tec">V</span> fondo &nbsp; ' +
-        '<span class="tec">F</span><span class="tec">G</span> alto &nbsp; ' +
-        '<span class="tec">T</span> volver a 0,70 × 1,70 × 0,70'
-      : '');
+    '<span class="tec">P</span> robot' +
+    ' &nbsp;·&nbsp; ahora: <b>' + ahora + '</b>' +
+    ' &nbsp;·&nbsp; él ocupa ' + cmp(t[0]) + ' × ' + cmp(t[1]) + ' × ' + cmp(t[2]) +
+    ' &nbsp;·&nbsp; la caja mide <b>' + (HX*2).toFixed(2) + ' × ' + (HY*2).toFixed(2) +
+    ' × ' + (HZ*2).toFixed(2) + '</b> m<br>' +
+    'caja: <span class="tec">Z</span><span class="tec">X</span> ancho &nbsp; ' +
+    '<span class="tec">C</span><span class="tec">V</span> fondo &nbsp; ' +
+    '<span class="tec">F</span><span class="tec">G</span> alto &nbsp; ' +
+    '<span class="tec">T</span> original &nbsp;·&nbsp; ' +
+    '<span class="tec">Q</span> color <b style="color:' + (PERSONA.tinte || G.color) + '">' +
+    (PERSONA.tinte || G.color) + '</b><br>' +
+    'gestos (en el suelo y parado): ' + gestos;
 }
 
 function abrirLab(){
@@ -3005,6 +3121,10 @@ function limpiarLab(){
      volver al juego, las torres se jugarían con un jugador de otro tamaño
      y el fallo aparecería lejísimos de aquí. */
   PERSONA.activo = false;
+  /* Se corta el gesto al salir. Sin esto, salir del lab bailando dejaba el
+     gesto puesto en memoria y al volver a entrar el robot seguía bailando
+     desde donde lo dejaste, sin haber tocado ninguna tecla. */
+  pararGesto();
   if (PERSONA.raiz) PERSONA.raiz.visible = false;
   if (PERSONA.caja){ W.scene.remove(PERSONA.caja);
     PERSONA.caja.geometry.dispose(); PERSONA.caja = null; }
@@ -3078,6 +3198,7 @@ function colorJugador(hex){
   const c=new THREE.Color(hex);
   if (W.playerBody) W.playerBody.material.color.set(c);
   if (W.playerVisor){ W.playerVisor.material.color.set(c); W.playerVisor.material.emissive.set(c); }
+  tintarPersona(hex);      // el robot del lab lleva el mismo color que el cilindro
 }
 /* Nombre del jugador.
    Antes el placeholder decía "miguel" y mucha gente lo leía como un nombre
@@ -3157,6 +3278,18 @@ addEventListener("keydown",e=>{
       case "KeyF": ajustarCaja(0,-P,0); return;
       case "KeyG": ajustarCaja(0,+P,0); return;
       case "KeyT": restaurarCaja(); pintarLab(); return;
+      case "KeyQ": {                       // rueda por los 8 de la paleta
+        const i = Math.max(0, PALETA.indexOf(G.color));
+        colorJugador(PALETA[(i + 1) % PALETA.length]);
+        pintarLab(); return;
+      }
+    }
+    /* Gestos con las cifras. Se miran ANTES del guardia de repetición pero
+       sólo en el primer pulsado: dejar la tecla apretada no tiene que
+       reiniciar el saludo sesenta veces por segundo. */
+    if (!G.keys[e.code]){
+      const g = gestoPorTecla(e.code);
+      if (g){ iniciarGesto(g); pintarLab(); }
     }
   }
   if (G.lab && e.code==="KeyP" && !G.keys["KeyP"] && PERSONA.raiz && !PERSONA.fallo){
@@ -3360,6 +3493,7 @@ if (/\bdebug\b/.test(location.hash)){
                  remotosCount:()=>remotos.size,
                  abrirLab, salirLab, LAB, alternarAlambres,
                  PERSONA, TALLA, VEL_CLIP, actualizarPersona, estadoPersona,
+                 GESTOS, iniciarGesto, pararGesto, tintarPersona, colorJugador, PALETA,
                  ajustarCaja, restaurarCaja, CAJA_0,
                  caja:()=>({hx:HX,hy:HY,hz:HZ}),
                  physicsStep, resolveCollisions, updateShadow, hitsSolid,

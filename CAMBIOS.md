@@ -63,6 +63,30 @@ verdad: lo correcto sería poner el renderer en sRGB, pero eso cambia el
 aspecto del juego entero —cielo, hormigón, óxido, todo— y es una decisión
 aparte, no un detalle técnico.
 
+## Y aun así llegó roto a producción: el Dockerfile
+
+Todo verde en local, desplegado y el laboratorio decía "el modelo no
+cargó". El motivo:
+
+```dockerfile
+COPY server.js ./
+COPY index.html ./
+```
+
+**La carpeta `modelos/` nunca entraba en la imagen.** Estaba en el repo,
+estaba en el commit, y no estaba en el contenedor: el servidor devolvía 404
+y no había forma de que nada lo avisara antes. Añadida
+`COPY modelos ./modelos`.
+
+Prueba nueva, `despliegue.js`, sin navegador. Sigue la cadena entera:
+qué rutas relativas pide `index.html` en tiempo de ejecución, qué `.bin` y
+qué texturas declara cada `.gltf` dentro, y qué copia de verdad el
+`Dockerfile`. Comprobado que **falla cuando debe**: quitando esa línea del
+Dockerfile, la prueba da 5 fallos y sale con código 1.
+
+Es la clase de fallo que ninguna prueba de navegador iba a ver, porque en
+local los archivos están ahí.
+
 ## Dos veces me equivoqué en la prueba, no en el código
 
 - Conté 7 bidones y son 8 (1 + 1 + 1 + 3 de la pila + 2 del salto).

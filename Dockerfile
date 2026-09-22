@@ -10,6 +10,10 @@ RUN npm install --omit=dev --no-audit --no-fund
 
 COPY server.js ./
 COPY index.html ./
+# Modelos 3D. Si esta línea falta, el juego arranca igual pero el
+# laboratorio no encuentra el bidón: la carpeta no entra en la imagen
+# y el servidor devuelve 404 sin que nada más se queje.
+COPY modelos ./modelos
 
 # No corremos como root dentro del contenedor
 USER node

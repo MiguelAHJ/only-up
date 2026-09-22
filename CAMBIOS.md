@@ -1,3 +1,86 @@
+# Cambios — 22 de septiembre de 2026 (décimo lote): laboratorio oculto y el primer modelo
+
+Un nivel de pruebas que no sale en ningún menú, con el Barrel_01 de Poly
+Haven cargado de verdad. Sirve para sentir si un prop engaña antes de
+meterlo en la torre.
+
+**Cómo se entra:** `Ctrl+Alt+B`, o `#lab` en la URL. No se usó `Ctrl` y `+`
+porque ese es el zoom del navegador y no se puede robar de forma fiable. El
+hash existe porque en el móvil no hay teclado, y el laboratorio también se
+abre ahí.
+
+**Qué hay dentro** — cinco estaciones en fila sobre suelo llano:
+
+| | qué prueba |
+|---|---|
+| 1 · de pie | la caja coincide con el objeto: no se nota nada |
+| 2 · tumbado con caja envolvente | **flotas 13,4 cm** a 24 cm del centro |
+| 3 · tumbado con losa inscrita | pisas la chapa que ves |
+| 4 · pila de tres | aterrizar en lo alto de una torre de bidones |
+| 5 · dos separados 3,5 m | un salto real entre props |
+
+`K` (o tocar la leyenda, en móvil) enseña y esconde los alambres de
+colisión. Salir con `Ctrl+Alt+B` otra vez, o por el menú de pausa.
+
+**No toca el generador ni la física.** El laboratorio arma a mano una
+"torre" con la misma forma de datos que devuelve `buildTower`, así que la
+cámara, `resolverCaja` y el HUD funcionan sin enterarse de que esto no es
+una torre de verdad. `summit` va a y=99999 para que no se pueda ganar.
+
+## Lo que hubo que tocar en el servidor
+
+`server.js` devolvía `index.html` para **cualquier** URL, así que pedir el
+`.gltf` traía el HTML del juego y el cargador se atragantaba sin decir por
+qué. Ahora hay una ruta estática bajo `/modelos/` con lista blanca de
+extensiones y comprobación de que la ruta resuelta cae dentro de la
+carpeta. Probado con peticiones crudas, porque un cliente normal normaliza
+los `../` antes de enviarlos y la prueba no probaría nada:
+
+```
+  OK   bloquea /modelos/../server.js              HTTP 403
+  OK   bloquea /modelos/%2e%2e/server.js          HTTP 403
+  OK   bloquea /modelos/barril/../../server.js    HTTP 403
+  OK   bloquea /modelos/../package.json           HTTP 403
+  OK   extensión no permitida                     HTTP 404
+```
+
+El modelo pesa **696 KB** en el repo (1k: gltf + bin + 3 jpg). Se sirve con
+`cache-control: max-age=3600`.
+
+## El bidón salía negro, y el motivo importa para el futuro
+
+Cargaba bien, estaba en la escena, se dibujaban sus 2.682 triángulos… y no
+se veía. **El juego no configura `outputEncoding`**, así que renderiza con
+el valor por defecto, que es lineal, y toda su paleta está ajustada a eso.
+GLTFLoader marca la textura de color como sRGB: three la des-gamma al
+leerla y no la vuelve a aplicar al escribir. Resultado, oscuro y lavado.
+
+Arreglo para el laboratorio: a la textura de color del modelo se le pone
+`LinearEncoding`, y entra en la misma tubería que el resto del juego.
+
+Esto hay que tenerlo presente **antes** de meter props en la torre de
+verdad: lo correcto sería poner el renderer en sRGB, pero eso cambia el
+aspecto del juego entero —cielo, hormigón, óxido, todo— y es una decisión
+aparte, no un detalle técnico.
+
+## Dos veces me equivoqué en la prueba, no en el código
+
+- Conté 7 bidones y son 8 (1 + 1 + 1 + 3 de la pila + 2 del salto).
+- La prueba de travesía de rutas daba 200 y parecía un agujero: era el
+  cliente normalizando `../` antes de enviarlo, así que nunca llegaba al
+  guardia. Con una petición cruda, los cuatro intentos dan 403.
+
+## Qué queda
+
+- El rendimiento con modelos sigue sin medirse. Ocho bidones son 21.456
+  triángulos y 31 llamadas de dibujo; una torre entera con props necesita
+  `InstancedMesh`.
+- La decisión de sRGB, arriba.
+- `GLTFLoader` se carga desde jsdelivr. Si algún día se cae, el juego
+  arranca igual: el laboratorio avisa y monta las cajas sin modelo.
+
+---
+
 # Cambios — 22 de septiembre de 2026 (noveno lote): se puede jugar en el móvil
 
 Hasta hoy, abrir el juego en el teléfono era mirar una torre sin poder

@@ -40,6 +40,37 @@ const texto = (v, d, max) => (typeof v === "string" && v.length ? v.slice(0, max
 /* ─────────────────────────── web ─────────────────────────── */
 const INDEX = path.join(__dirname, "index.html");
 
+/* Archivos estáticos, solo bajo /modelos/.
+   Hasta ahora este servidor devolvía index.html para CUALQUIER url, así que
+   pedir un .gltf traía el HTML del juego y el cargador se atragantaba sin
+   decir por qué. Se sirve una lista blanca de extensiones y se comprueba
+   que la ruta resuelta caiga dentro de la carpeta: con "../" en la url no
+   se sale de ahí. */
+const RAIZ_MODELOS = path.join(__dirname, "modelos") + path.sep;
+const TIPOS = {
+  ".gltf": "model/gltf+json",
+  ".glb":  "model/gltf-binary",
+  ".bin":  "application/octet-stream",
+  ".jpg":  "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png":  "image/png",
+  ".webp": "image/webp",
+  ".ktx2": "image/ktx2",
+};
+function servirModelo(ruta, res) {
+  let abs;
+  try { abs = path.resolve(__dirname, "." + decodeURIComponent(ruta)); }
+  catch (e) { res.writeHead(400); res.end(); return; }
+  if (!abs.startsWith(RAIZ_MODELOS)) { res.writeHead(403); res.end(); return; }
+  const tipo = TIPOS[path.extname(abs).toLowerCase()];
+  if (!tipo) { res.writeHead(404); res.end(); return; }
+  fs.readFile(abs, (err, buf) => {
+    if (err) { res.writeHead(404); res.end(); return; }
+    res.writeHead(200, { "content-type": tipo, "cache-control": "public, max-age=3600" });
+    res.end(buf);
+  });
+}
+
 const server = http.createServer((req, res) => {
   const ruta = (req.url || "/").split("?")[0];
 
@@ -57,6 +88,8 @@ const server = http.createServer((req, res) => {
     }))));
     return;
   }
+
+  if (ruta.startsWith("/modelos/")) { servirModelo(ruta, res); return; }
 
   fs.readFile(INDEX, (err, html) => {
     if (err) {

@@ -18,12 +18,13 @@
   }
   *{box-sizing:border-box}
   html,body{height:100%;margin:0;background:var(--void);color:var(--bone);font-family:var(--sans);overflow:hidden}
-  /* dvh, no vh: en iOS la barra de direcciones aparece y desaparece durante
-     la partida y con vh el lienzo se queda de otro tamaño que la ventana. */
-  @supports (height:100dvh){ html,body{height:100dvh} }
   canvas{display:block}
   button{font:inherit;color:inherit;cursor:pointer}
-  #scene{position:absolute;inset:0}
+  /* fixed, no absolute: absolute se resuelve contra el bloque contenedor
+     inicial, que en el móvil NO es la pantalla que estás viendo cuando hay
+     muesca o la barra de direcciones se retrae. Con fixed, todas las capas
+     se anclan al viewport real y ninguna se queda corta. */
+  #scene{position:fixed;inset:0}
 
   /* ── móvil ────────────────────────────────────────────────────────────
      Sin esto el navegador se come los gestos antes que el juego: doble
@@ -33,7 +34,7 @@
   body.tactil{-webkit-user-select:none; user-select:none; -webkit-touch-callout:none}
   body.tactil.jugando{touch-action:none}     /* solo jugando: el menú sigue haciendo scroll */
 
-  #tactil{position:absolute;inset:0;z-index:3;pointer-events:none;display:none}
+  #tactil{position:fixed;inset:0;z-index:3;pointer-events:none;display:none}
   body.tactil.jugando #tactil{display:block}
 
   #joy{position:absolute;width:132px;height:132px;margin:-66px 0 0 -66px;
@@ -61,8 +62,21 @@
      del pulgar que salta. Reiniciar vive donde debe, en el menú de pausa
      ("VOLVER AL SUELO"), detrás de un paso más. */
 
+  /* leyenda del laboratorio oculto */
+  #labinfo{position:fixed;left:50%;transform:translateX(-50%);
+    top:calc(10px + env(safe-area-inset-top,0px));z-index:4;pointer-events:auto;cursor:pointer;
+    background:rgba(11,14,20,.62);border:1px solid var(--edge);border-radius:8px;
+    padding:9px 14px;font-family:var(--mono);font-size:11px;letter-spacing:.06em;
+    color:var(--ash);max-width:min(620px,92vw);text-align:center;line-height:1.85}
+  #labinfo[hidden]{display:none!important}
+  #labinfo b{color:var(--bone);font-weight:600}
+  #labinfo .n{color:var(--ember);font-weight:600}
+  #labinfo .mal{color:var(--danger)}
+  #labinfo .bien{color:var(--signal)}
+  #labinfo .tec{border:1px solid var(--edge);border-radius:4px;padding:1px 5px;color:var(--bone)}
+
   /* pantalla de "gira el móvil" */
-  #gira{position:absolute;inset:0;z-index:40;display:none;flex-direction:column;
+  #gira{position:fixed;inset:0;z-index:40;display:none;flex-direction:column;
     align-items:center;justify-content:center;gap:18px;text-align:center;
     background:var(--void);padding:28px}
   body.tactil.vertical #gira{display:flex}
@@ -84,7 +98,7 @@
     body.jugando #sala{top:calc(14px + env(safe-area-inset-top,0px));right:74px}
   }
 
-  #hud{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .4s}
+  #hud{position:fixed;inset:0;pointer-events:none;opacity:0;transition:opacity .4s}
   #hud.on{opacity:1}
   #hud::before{content:"";position:absolute;left:0;right:0;top:0;height:190px;
     background:linear-gradient(to bottom,rgba(11,14,20,.66),rgba(11,14,20,0))}
@@ -172,7 +186,7 @@
   .statusbar .sep{width:1px;height:12px;background:var(--edge)}
   .statusbar .run{color:var(--signal)}
 
-  .screen{position:absolute;inset:0;display:flex;align-items:flex-start;justify-content:center;
+  .screen{position:fixed;inset:0;display:flex;align-items:flex-start;justify-content:center;
     padding-block:calc(26px + env(safe-area-inset-top,0px)) calc(26px + env(safe-area-inset-bottom,0px));
     padding-inline:24px;overflow-y:auto;
     background:radial-gradient(120% 90% at 50% 8%,#1A1524 0%,#0B0E14 62%)}
@@ -242,7 +256,7 @@
     color:var(--bone);font-family:var(--mono);font-size:15px;padding:11px 12px;outline:none}
   input:focus{border-color:var(--ember)}
 
-  .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
     background:rgba(11,14,20,.9);backdrop-filter:blur(7px);padding:24px}
   .overlay[hidden]{display:none!important}
   .ovbox{width:min(460px,100%);display:flex;flex-direction:column;gap:16px}
@@ -258,6 +272,8 @@
   <button class="btnT" id="btnSalto" type="button">SALTAR</button>
   <button class="btnT" id="btnPausaT" type="button" aria-label="Pausa">❚❚</button>
 </div>
+
+<div id="labinfo" hidden></div>
 
 <div id="gira">
   <div class="icono"></div>
@@ -378,6 +394,9 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<!-- Cargador de glTF, solo lo usa el laboratorio oculto. Si no llega, el
+     juego funciona igual: el laboratorio avisa y monta las cajas sin modelo. -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script>
 "use strict";
 (function(){
@@ -1221,10 +1240,25 @@ function initWorld(){
     new THREE.MeshBasicMaterial({color:0x0B0E14,transparent:true,opacity:0.5,depthWrite:false,fog:false}));
   W.shadow.rotation.x=-Math.PI/2; W.scene.add(W.shadow);
 
-  addEventListener("resize",()=>{
-    W.camera.aspect=innerWidth/innerHeight; W.camera.updateProjectionMatrix();
-    W.renderer.setSize(innerWidth,innerHeight);
-  });
+  /* El lienzo se mide del CONTENEDOR, nunca de innerWidth/innerHeight.
+     En el móvil esos dos no coinciden con la caja real: hay muesca de
+     cámara, barra de navegación por gestos y una barra de direcciones que
+     se retrae, y el canvas acababa más pequeño que la pantalla — se veía
+     una franja oscura alrededor, que es el fondo del body asomando.
+     Un ResizeObserver no se puede desincronizar: salta cuando la caja
+     cambia, sea por girar el teléfono, por la barra o por lo que sea. */
+  function ajustarLienzo(){
+    const r = host.getBoundingClientRect();
+    const w = Math.max(1, Math.round(r.width)), h = Math.max(1, Math.round(r.height));
+    W.camera.aspect = w/h; W.camera.updateProjectionMatrix();
+    W.renderer.setSize(w, h, false);          // false: el CSS lo pone el contenedor
+    W.renderer.domElement.style.width  = "100%";
+    W.renderer.domElement.style.height = "100%";
+  }
+  if (window.ResizeObserver) new ResizeObserver(ajustarLienzo).observe(host);
+  addEventListener("resize", ajustarLienzo);
+  addEventListener("orientationchange", () => setTimeout(ajustarLienzo, 250));
+  ajustarLienzo();
 }
 
 function buildMeshes(tower){
@@ -1263,6 +1297,7 @@ const G = {
   best:0, worst:0, apex:0, elapsed:0, won:false,
   keys:Object.create(null),
   stick:null,             // {x,z,mag} mientras haya un dedo en el joystick
+  lab:false,              // dentro del laboratorio oculto
   ultimaEntrada:0,        // última vez que tocaste teclado o ratón (ver siesta)
   // cámara amortiguada — desacoplada de la posición física
   camX:0, camY:0, camZ:0, camDist:6.2
@@ -2192,6 +2227,178 @@ function regenerate(){
 function spec(k,v,em){
   return '<div class="spec"><span class="k">'+k+'</span><span class="v'+(em?' em':'')+'">'+v+'</span></div>';
 }
+/* ═══════════════════════════════════════════════════════════════
+   LABORATORIO OCULTO  ·  Ctrl+Alt+B, o #lab en la URL
+   Banco de pruebas para props. No aparece en ningún menú. No toca el
+   generador ni la física: se arma "a mano" una torre con la misma forma de
+   datos que devuelve buildTower, así que la cámara, las colisiones y el HUD
+   funcionan sin enterarse de que esto no es una torre de verdad.
+   ═══════════════════════════════════════════════════════════════ */
+const LAB = { modelo:null, grupo:null, alambres:null, verAlambres:true, aviso:"" };
+
+/* Se carga una vez y se clona. El origen se deja en el CENTRO DE LA BASE
+   para poder colocar cada bidón por donde se apoya, que es como se piensa
+   al montar un nivel. */
+function cargarBidon(cb){
+  if (LAB.modelo) return cb(LAB.modelo);
+  if (typeof THREE.GLTFLoader !== "function"){
+    LAB.aviso = "el cargador de glTF no llegó"; return cb(null);
+  }
+  new THREE.GLTFLoader().load("modelos/barril/Barrel_01_1k.gltf", (g) => {
+    const m = g.scene;
+    /* Este juego renderiza con el outputEncoding por defecto (lineal), y
+       toda su paleta está ajustada a eso. GLTFLoader marca la textura de
+       color como sRGB, así que three la des-gamma al leerla y no la vuelve
+       a aplicar al escribir: el bidón salía oscuro y lavado. Se le pone
+       encoding lineal para que entre en la misma tubería que el resto.
+       (Lo correcto de verdad sería poner el renderer en sRGB, pero eso
+       cambia el aspecto del juego ENTERO y es otra decisión.) */
+    m.traverse(o => {
+      if (!o.isMesh || !o.material) return;
+      for (const mat of (Array.isArray(o.material) ? o.material : [o.material])){
+        if (mat.map){ mat.map.encoding = THREE.LinearEncoding; mat.map.needsUpdate = true; }
+        mat.needsUpdate = true;
+      }
+    });
+    m.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(m);
+    const d = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3());
+    m.position.set(-c.x, -bb.min.y, -c.z);
+    const cont = new THREE.Group(); cont.add(m);
+    LAB.aviso = ""; LAB.modelo = { obj:cont, d };
+    cb(LAB.modelo);
+  }, undefined, (e) => {
+    console.error("[lab] no cargó el bidón:", e);
+    LAB.aviso = "el modelo no cargó · ¿sirve el servidor /modelos/?";
+    cb(null);
+  });
+}
+
+function montarLab(mod){
+  // medidas tomadas del propio modelo; si no cargó, las del catálogo
+  const D = mod ? mod.d : new THREE.Vector3(0.563, 0.880, 0.563);
+  const R = D.x/2;
+
+  const solids = [], visuals = [], bidones = [];
+  const caja = (cx,cy,cz,sx,sy,sz,mat,choca) => {
+    if (mat)   visuals.push({cx,cy,cz,sx,sy,sz,yaw:0,mat,shape:"box"});
+    if (choca) solids.push({x:cx,y:cy,z:cz,hw:sx/2,hh:sy/2,hd:sz/2,yaw:0});
+  };
+  const placa = (x,mat) => caja(x,0.012,0, 3.0,0.024,3.0, mat, false);
+  const pon   = (x,y,tumbado) => bidones.push({x,y,tumbado});
+
+  caja(14,-0.5,0, 42,1,16, "hormigon", true);                    // suelo
+
+  // 1 · DE PIE — la caja coincide con el objeto, no se nota nada
+  placa(4,"galv");     pon(4,0,false);
+  caja(4, D.y/2, 0, D.x, D.y, D.z, null, true);
+
+  // 2 · TUMBADO con la caja ENVOLVENTE — aquí se flota hasta 19 cm
+  placa(9,"oxido");    pon(9,0,true);
+  caja(9, R, 0, D.x, D.x, D.y, null, true);
+
+  // 3 · TUMBADO con la LOSA INSCRITA — pisas la chapa que ves
+  placa(14,"pintado"); pon(14,0,true);
+  const LOSA = 0.24, GRUESO = 0.10;
+  caja(14, D.x - GRUESO/2, 0, LOSA, GRUESO, D.y, null, true);
+
+  // 4 · PILA de tres
+  placa(19,"galv");
+  for (let i=0;i<3;i++){ pon(19, i*D.y, false);
+    caja(19, i*D.y + D.y/2, 0, D.x, D.y, D.z, null, true); }
+
+  // 5 · DOS SEPARADOS 3,5 m para saltar entre ellos
+  for (const x of [25, 28.5]){ placa(x,"pintado"); pon(x,0,false);
+    caja(x, D.y/2, 0, D.x, D.y, D.z, null, true); }
+
+  G.tower = indexarTorre({ solids, visuals, apoyos:[],
+    summit:{x:0,y:99999,z:0},                     // inalcanzable: aquí no se gana
+    start:{x:0,z:0,yaw:-Math.PI/2},               // fx=-sin(yaw): mirando a +x
+    altura:20, informe:{piezas:solids.length} });
+  buildMeshes(G.tower);
+
+  // los bidones los pinta el modelo, no un cubo
+  if (LAB.grupo) W.scene.remove(LAB.grupo);
+  LAB.grupo = new THREE.Group();
+  if (mod) for (const b of bidones){
+    const c = mod.obj.clone(true);
+    if (b.tumbado) c.rotation.x = Math.PI/2;
+    /* Se recoloca midiendo la caja YA girada en vez de calcular el
+       desplazamiento a mano: tumbado, el origen deja de estar donde crees. */
+    c.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(c), ce = bb.getCenter(new THREE.Vector3());
+    c.position.set(b.x - ce.x, b.y - bb.min.y, -ce.z);
+    LAB.grupo.add(c);
+  }
+  W.scene.add(LAB.grupo);
+
+  // alambres de colisión, todo menos el suelo
+  if (LAB.alambres) W.scene.remove(LAB.alambres);
+  LAB.alambres = new THREE.Group();
+  for (const s of solids){
+    if (s.hw > 5) continue;
+    const l = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(s.hw*2, s.hh*2, s.hd*2)),
+      new THREE.LineBasicMaterial({color:0xE8B23A}));
+    l.position.set(s.x, s.y, s.z);
+    LAB.alambres.add(l);
+  }
+  LAB.alambres.visible = LAB.verAlambres;
+  W.scene.add(LAB.alambres);
+
+  G.altura = 20; buildTicks();
+  $("hCode").textContent = "LAB";
+  respawn();
+  pintarLab();
+}
+
+function pintarLab(){
+  const tecla = ES_TACTIL ? '<span class="tec">toca la leyenda</span>'
+                          : '<span class="tec">K</span>';
+  $("labinfo").innerHTML =
+    (LAB.aviso ? '<span class="mal">· ' + LAB.aviso + ' ·</span><br>' : '') +
+    '<b>LABORATORIO</b> &nbsp;·&nbsp; ' +
+    '<span class="n">1</span> de pie &nbsp; ' +
+    '<span class="n">2</span> tumbado <span class="mal">caja envolvente</span> &nbsp; ' +
+    '<span class="n">3</span> tumbado <span class="bien">losa inscrita</span> &nbsp; ' +
+    '<span class="n">4</span> pila &nbsp; ' +
+    '<span class="n">5</span> salto de 3,5 m<br>' +
+    tecla + ' alambres de colisión: <b>' + (LAB.verAlambres ? "sí" : "no") + '</b>' +
+    ' &nbsp;·&nbsp; <span class="tec">Ctrl+Alt+B</span> salir';
+}
+
+function abrirLab(){
+  if (G.lab) return;
+  G.lab = true;
+  Net.cerrar(); limpiarRemotos(); log("");
+  $("menu").hidden = true; $("pause").hidden = true; $("win").hidden = true;
+  $("labinfo").hidden = false;
+  $("sala").hidden = true;
+  cargarBidon((mod) => {
+    montarLab(mod);
+    G.mode="play"; G.elapsed=0; G.best=0; G.worst=0; G.won=false;
+    $("hud").classList.add("on");
+    lock();
+  });
+}
+
+function limpiarLab(){
+  G.lab = false;
+  if (LAB.grupo)    { W.scene.remove(LAB.grupo);    LAB.grupo = null; }
+  if (LAB.alambres) { W.scene.remove(LAB.alambres); LAB.alambres = null; }
+  $("labinfo").hidden = true;
+  regenerate();                       // devuelve la torre de verdad
+}
+function salirLab(){ if (G.lab){ limpiarLab(); toMenu(); } }
+
+function alternarAlambres(){
+  LAB.verAlambres = !LAB.verAlambres;
+  if (LAB.alambres) LAB.alambres.visible = LAB.verAlambres;
+  pintarLab();
+}
+$("labinfo").addEventListener("click", alternarAlambres);
+$("labinfo").addEventListener("touchstart", (e) => { e.preventDefault(); alternarAlambres(); }, {passive:false});
+
 function play(){
   G.mode="play"; G.elapsed=0; G.best=0; G.worst=0; G.won=false;
   respawn();
@@ -2277,6 +2484,7 @@ function codigoAzar(){
   return s;
 }
 function toMenu(){
+  if (G.lab) limpiarLab();            // el botón MENÚ de la pausa también sale
   Net.cerrar(); limpiarRemotos(); log("");
   G.mode="menu"; $("hud").classList.remove("on");
   $("pause").hidden=true; $("win").hidden=true; $("menu").hidden=false;
@@ -2303,6 +2511,12 @@ for (const ev of ["keydown","mousedown","wheel","touchstart"])
 // el ratón solo cuenta si se mueve de verdad
 addEventListener("mousemove", e=>{ if (e.movementX||e.movementY) actividad(); }, {passive:true});
 addEventListener("keydown",e=>{
+  /* Ctrl+Alt+B: laboratorio. No se usa Ctrl y "+" porque ese es el zoom del
+     navegador y no se puede robar de forma fiable. */
+  if (e.ctrlKey && e.altKey && e.code==="KeyB"){
+    e.preventDefault(); G.lab ? salirLab() : abrirLab(); return;
+  }
+  if (G.lab && e.code==="KeyK" && !G.keys["KeyK"]){ alternarAlambres(); }
   if (e.code==="Space" && G.mode==="play") e.preventDefault();
   if (G.keys[e.code]) return;
   G.keys[e.code]=true;
@@ -2480,16 +2694,22 @@ $("pname").addEventListener("focus", e => e.target.select());
 if (!urlServidor()) $("srvWrap").hidden = false;
 requestAnimationFrame(loop);
 
+/* #lab en la URL abre el laboratorio: es la única forma de llegar desde el
+   móvil, donde no hay Ctrl+Alt+B. Se compara por trozos para no confundirlo
+   con #debug ni con #sala=LABS. */
+if (location.hash.replace(/^#/,"").split(/[&,;]/).includes("lab")) abrirLab();
+
 // Gancho de depuración: solo con #debug en la URL. Sirve para medir la
 // corrección de posición al aterrizar y comprobar que no hay tirón.
 if (/\bdebug\b/.test(location.hash)){
-  window.__T = { G, CAPS, AV, play, respawn, Net, Perf,
+  window.__T = { G, CAPS, AV, W, play, respawn, Net, Perf,
                  regenerate, buildTower, indexarTorre, doJump, JumpMath, MURO_ALTO,
                  colocarSendero, colocarCornisa, colocarTrampolines, DIFS,
                  TRAMPOLIN_ALTO, TRAMPOLIN_V,
                  caps:()=>JumpMath.compute(),
                  informe:()=>G.tower.informe,
                  remotosCount:()=>remotos.size,
+                 abrirLab, salirLab, LAB, alternarAlambres,
                  physicsStep, resolveCollisions, updateShadow, hitsSolid,
                  CELDA, cubos:()=>G.tower.idx.size };
 }

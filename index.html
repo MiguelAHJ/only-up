@@ -625,6 +625,39 @@ function arcoLibre(lista, desde, ax, ay, az, bx, by, bz){
    donde un jugador se puede parar (la herramienta está en el banco de
    pruebas, fuera del repo). El asiento salió plano al milímetro: del
    percentil 10 al 90 hay 0,0 cm de desnivel. */
+/* Un ANILLO de cajas para un objeto hueco. N sectores alrededor del eje:
+   cada caja se coloca en el radio medio, girada para que su lado largo
+   quede tangente. Con 12 sectores el error frente al círculo real es de
+   poco más de un centímetro, que no se nota pisando.
+   El giro sale de cómo compone el motor: el +z local de una caja con yaw φ
+   apunta a (sin φ, cos φ), y la tangente en el ángulo α es (−sin α, cos α),
+   así que φ = −α. Escrito porque un signo mal aquí deja el anillo hecho una
+   estrella y cuesta verlo. */
+function anilloCajas(N, rIn, rOut, alto, y0){
+  const rMed = (rIn + rOut) / 2, grosor = rOut - rIn;
+  // +12% de solape entre sectores: sin él quedan rendijas por las esquinas
+  const largo = 2 * rMed * Math.sin(Math.PI / N) * 1.12;
+  const out = [];
+  for (let i = 0; i < N; i++){
+    const a = i * 2 * Math.PI / N;
+    out.push({ c:[rMed*Math.cos(a), (y0||0) + alto/2, rMed*Math.sin(a)],
+               t:[grosor, alto, largo], yaw:-a });
+  }
+  return out;
+}
+/* El fondo de un cilindro hueco, con tres cajas giradas 60°. No es el mismo
+   truco que el del bidón: allí las cajas van INSCRITAS para no sobresalir
+   de la silueta, y aquí se solapan a propósito porque es un suelo y lo que
+   importa es que no queden agujeros. Tres cajas de 2R × R cubren el disco
+   entero: en la peor dirección (30° de cada una) la condición es
+   r·sen30° ≤ R/2, o sea r ≤ R. */
+function fondoCajas(R, alto, y0){
+  const out = [];
+  for (let i = 0; i < 3; i++)
+    out.push({ c:[0, (y0||0) + alto/2, 0], t:[2*R, alto, R], yaw: i*Math.PI/3 });
+  return out;
+}
+
 const PROPS = {
   /* BIDÓN. De pie, una caja cuadrada sobresale 11,7 cm en las esquinas y
      te deja de pie sobre aire visible. Como los colisionadores se UNEN y
@@ -665,13 +698,35 @@ const PROPS = {
      Los colisionadores de aquí abajo son PROVISIONALES: están puestos por
      analogía con el bidón, y se afinan en el laboratorio midiendo, que es
      como se hicieron los del bidón y la silla. */
+  /* CUBILETE. No es un escalón: es un SITIO DONDE CAERSE.
+     Con el colisionador sólido del primer intento te quedabas de pie sobre
+     el agujero, que se veía raro. Ahora es un anillo de verdad: saltas,
+     caes dentro, y para salir hay que subirse al bordillo — y desde el
+     bordillo se sale más alto, que es lo que lo hace útil.
+
+     LA ESCALA LA MANDA ESA MECÁNICA, no el parecido con un bidón:
+       · dentro tiene que caber el jugador (0,70 de ancho) con holgura
+       · y tiene que poder salir de UN salto, que sube 2,20 m
+     Midiendo el modelo por rayos: fondo interior a 0,069 y borde a 0,747
+     de su propia altura, o sea que el hueco es el 90% de lo que mide. A
+     escala 25 el hueco queda en 1,90 m de hondo, 30 cm por debajo de lo
+     que sube un salto simple. A 28 se quedaría en 2,12 y sería una trampa.
+
+     Medidas a escala 25: 2,09 de alto y de ancho, hueco de 1,68 de
+     diámetro, fondo a 0,19, borde a 2,09 y bordillo de 0,21 de ancho.
+
+     SALIR, medido con el motor saltando desde el fondo en 8 direcciones y
+     13 empujes distintos: con un empuje suave (15-20% de la carrera) se
+     acierta el bordillo en el 100% de las direcciones, y con empujes
+     mayores en torno a la mitad. O sea que se sale, y se sale mejor
+     tocando poco — que es justo el gesto que pide la pieza. Pasarse de
+     empuje no te encierra: te deja FUERA del cubilete, en el suelo. Ojo a
+     eso cuando esto entre en la torre, porque allí «fuera» puede ser el
+     vacío. */
   cubilete: { ruta:"modelos/papeleria/stationery_supplies_1k.gltf",
-              nodo:"stationery_supplies_pencilcup", escala:8.94,
-              /* Cilindro de 0,75 de diámetro: las mismas tres cajas
-                 inscritas giradas 60° que el bidón, reescaladas. */
-              dePie: [ {c:[0,0.375,0], t:[0.335,0.750,0.670], yaw:0},
-                       {c:[0,0.375,0], t:[0.335,0.750,0.670], yaw:Math.PI/3},
-                       {c:[0,0.375,0], t:[0.335,0.750,0.670], yaw:2*Math.PI/3} ] },
+              nodo:"stationery_supplies_pencilcup", escala:25.0,
+              dePie: [ ...anilloCajas(12, 0.839, 1.046, 2.089, 0),
+                       ...fondoCajas(0.839, 0.193, 0) ] },
 
   goma: { ruta:"modelos/papeleria/stationery_supplies_1k.gltf",
           nodo:"stationery_supplies_eraser", escala:28.58,
@@ -687,9 +742,15 @@ const PROPS = {
            nodo:"stationery_supplies_pencil_new_a", escala:69.45,
            dePie: [ {c:[0,0.500,0], t:[13.466,0.100,0.300]} ] },
 
-  boli: { ruta:"modelos/papeleria/stationery_supplies_1k.gltf",
-          nodo:"stationery_supplies_pen_fancy", escala:38.72,
-          dePie: [ {c:[0,0.500,0], t:[5.083,0.100,0.260]} ] }
+  /* LÁPIZ CORTO. Aquí había un bolígrafo y no valía: medido por rayos, su
+     lomo va de 0,21 a 0,39 en forma de cono y el 0,55 de la caja
+     envolvente es el CLIP. Con un colisionador plano a 0,55 se andaba
+     flotando hasta 34 cm por encima del boli, que es exactamente lo que se
+     veía. Los bolígrafos del archivo se estrechan; los lápices son prismas
+     uniformes de punta a punta. Así que el corto es un lápiz gastado. */
+  lapizcorto: { ruta:"modelos/papeleria/stationery_supplies_1k.gltf",
+                nodo:"stationery_supplies_pencil_old", escala:70.51,
+                dePie: [ {c:[0,0.500,0], t:[6.634,0.100,0.300]} ] }
 };
 
 /* Medidas del modelo, en metros, para que el GENERADOR pueda colocar sin
@@ -702,16 +763,17 @@ const PROP_DIM = {
   bidon: { ancho:0.563, alto:0.880, fondo:0.563 },
   silla: { ancho:0.639, alto:1.264, fondo:0.662 },
   // ya escaladas: el modelo es diminuto y la escala vive en PROPS
-  cubilete: { ancho:0.748, alto:0.750, fondo:0.748 },
-  goma:     { ancho:1.273, alto:0.300, fondo:0.532 },
-  lapiz:    { ancho:13.466, alto:0.550, fondo:0.550 },
-  boli:     { ancho:5.083,  alto:0.550, fondo:0.388 },
+  cubilete:   { ancho:2.092, alto:2.097, fondo:2.092 },
+  goma:       { ancho:1.273, alto:0.300, fondo:0.532 },
+  lapiz:      { ancho:13.466, alto:0.550, fondo:0.550 },
+  lapizcorto: { ancho:6.634,  alto:0.550, fondo:0.550 },
 };
 /* A qué altura queda la cara pisable de cada objeto, contando desde su
    base. Son las que se eligieron en el laboratorio, no cotas del modelo:
    el asiento de la silla está a 0,585 aunque el respaldo suba a 1,26. */
 const PROP_PISA = { bidonPie:0.880, bidonTumbado:0.563, silla:0.585,
-                    cubilete:0.750, goma:0.300, lapiz:0.550, boli:0.550 };
+                    /* del cubilete se pisa el BORDILLO, no la tapa: no tiene */
+                    cubilete:2.089, goma:0.300, lapiz:0.550, lapizcorto:0.550 };
 
 /* ═══════════════════════════════════════════════════════════════
    3 · Generador — mismas reglas que TorreGenerator.cs
@@ -4296,7 +4358,7 @@ function montarLab(){
     }
   };
 
-  caja(38,-0.5,0, 100,1,16, "hormigon", true);                   // suelo del banco
+  caja(40,-0.5,0, 104,1,16, "hormigon", true);                   // suelo del banco
 
   // ── BIDONES ─────────────────────────────────────────────────────────
   // 1 · de pie con la caja cuadrada de antes: 11,7 cm de aire en la esquina
@@ -4356,34 +4418,37 @@ function montarLab(){
        · lápiz    — 13,5 m: ¿se anda por el lomo sin caerse? Es hexagonal,
                     así que debería dar más ancho que la cresta redonda de
                     un bidón, pero eso se mide aquí, no se supone. */
-  const CU = LAB.modelos.cubilete, GO = LAB.modelos.goma;
-
-  // 10 · cubilete: con su caja envolvente, para ver cuánto sobra en esquinas
+  /* 10 · CUBILETE MACIZO, para ver por qué no vale. Se queda con la caja
+     envolvente a propósito: te plantas sobre el agujero. Está aquí como
+     está la caja cuadrada del bidón — para poder comparar el error. */
   placa(56,"oxido");   pon("cubilete",56,0,false);
-  caja(56, 0.375, 0, 0.748, 0.750, 0.748, null, true);
+  caja(56, 1.048, 0, 2.092, 2.097, 2.092, null, true);
 
-  // 11 · cubilete con las tres cajas inscritas, como el bidón
-  placa(60,"galv");    pon("cubilete",60,0,false);
-  deProp(60, 0, PROPS.cubilete.dePie);
+  /* 11 · CUBILETE CON ANILLO. Salta dentro: caes al fondo, a 0,19, y para
+     salir hay que subirse al bordillo, a 2,09. El hueco tiene 1,90 de
+     hondo y un salto simple sube 2,20, así que se sale de uno — con 30 cm
+     de margen, que es poco y por eso está aquí para probarlo. */
+  placa(62,"galv");    pon("cubilete",62,0,false);
+  deProp(62, 0, PROPS.cubilete.dePie);
 
   // 12 · goma: una sola caja y debería bastar
-  placa(64,"galv");    pon("goma",64,0,false);
-  deProp(64, 0, PROPS.goma.dePie);
+  placa(68,"galv");    pon("goma",68,0,false);
+  deProp(68, 0, PROPS.goma.dePie);
 
   // 13 · dos gomas separadas 2,8 m: es el escalón más bajo del juego (0,30)
-  for (const x of [68, 70.8]){ placa(x,"pintado"); pon("goma",x,0,false);
+  for (const x of [72, 74.8]){ placa(x,"pintado"); pon("goma",x,0,false);
     deProp(x, 0, PROPS.goma.dePie); }
 
-  // 14 · el boli, 5,1 m tumbado a lo largo de X
-  caja(76, 0.012, 0, 6.0, 0.024, 3.0, "oxido", false);
-  pon("boli",76,0,false);
-  deProp(76, 0, PROPS.boli.dePie);
+  // 14 · el lápiz corto, 6,6 m, tumbado a lo largo de X
+  caja(80, 0.012, 0, 7.4, 0.024, 3.0, "oxido", false);
+  pon("lapizcorto",80,0,false);
+  deProp(80, 0, PROPS.lapizcorto.dePie);
 
   /* 15 · EL LÁPIZ COMO PUENTE, que es para lo que se escaló así.
      Dos pilares y 13,5 m de lápiz entre ellos, sin nada debajo: la única
      forma de cruzar es andando por el lomo. Si el ancho pisable no da,
      aquí se nota a la primera. */
-  const LX = 90, LY = 1.20;                    // centro y altura de la base
+  const LX = 92, LY = 1.20;                    // centro y altura de la base
   caja(LX - 7.4, LY/2 + 0.275, 0, 1.6, LY + 0.55, 2.4, "hormigon", true);
   caja(LX + 7.4, LY/2 + 0.275, 0, 1.6, LY + 0.55, 2.4, "hormigon", true);
   pon("lapiz", LX, LY, false, 0, 0);
@@ -4517,11 +4582,11 @@ function pintarLab(){
     'SILLA &nbsp; ' + n(7) + '<span class="mal">una caja</span> · 68 cm de aire &nbsp; ' +
     n(8) + '<span class="bien">asiento + respaldo + 4 patas</span> &nbsp; ' +
     n(9) + 'salto de asiento a asiento<br>' +
-    'PAPELERÍA <span class="mal">(colisionadores provisionales)</span> &nbsp; ' +
-    n(10) + 'cubilete <span class="mal">envolvente</span> &nbsp; ' +
-    n(11) + 'cubilete <span class="bien">3 inscritas</span> &nbsp; ' +
+    'PAPELERÍA &nbsp; ' +
+    n(10) + 'cubilete <span class="mal">macizo</span> &nbsp; ' +
+    n(11) + 'cubilete <span class="bien">anillo</span> · cae dentro y sube al bordillo &nbsp; ' +
     n(12) + 'goma &nbsp; ' + n(13) + 'dos gomas · escalón de 0,30 &nbsp; ' +
-    n(14) + 'boli 5,1 m &nbsp; ' + n(15) + '<b>lápiz: puente de 13,5 m</b><br>' +
+    n(14) + 'lápiz corto 6,6 m &nbsp; ' + n(15) + '<b>lápiz: puente de 13,5 m</b><br>' +
     tecla + ' alambres de colisión: <b>' + (LAB.verAlambres ? "sí" : "no") + '</b>' +
     ' &nbsp;·&nbsp; <span class="tec">Ctrl+Alt+B</span> salir' +
     filaPersona();

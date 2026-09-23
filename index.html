@@ -651,7 +651,45 @@ const PROPS = {
            patas: [ {c:[-0.231, 0.2425,  0.272], t:[0.07, 0.485, 0.07]},
                     {c:[ 0.226, 0.2425,  0.272], t:[0.07, 0.485, 0.07]},
                     {c:[-0.263, 0.2425, -0.212], t:[0.07, 0.485, 0.07]},
-                    {c:[ 0.263, 0.2425, -0.212], t:[0.07, 0.485, 0.07]} ] }
+                    {c:[ 0.263, 0.2425, -0.212], t:[0.07, 0.485, 0.07]} ] },
+
+  /* PAPELERÍA. Un solo archivo con NUEVE piezas y un solo material, así que
+     hay que elegir por nombre de nodo — el cargador de antes cogía siempre
+     la primera malla y aquí eso no vale.
+     Y hay que ESCALAR: un lápiz de verdad mide 19 cm de largo por 8 mm de
+     grueso. La escala no se elige a ojo sino por un objetivo medido: para
+     el cubilete y la goma, la ALTURA a la que quedan (que es lo que importa
+     para pisarlos); para el lápiz y el boli, el GROSOR (que es lo que
+     decide si se puede andar por encima). De ahí salen las cifras.
+
+     Los colisionadores de aquí abajo son PROVISIONALES: están puestos por
+     analogía con el bidón, y se afinan en el laboratorio midiendo, que es
+     como se hicieron los del bidón y la silla. */
+  cubilete: { ruta:"modelos/papeleria/stationery_supplies_1k.gltf",
+              nodo:"stationery_supplies_pencilcup", escala:8.94,
+              /* Cilindro de 0,75 de diámetro: las mismas tres cajas
+                 inscritas giradas 60° que el bidón, reescaladas. */
+              dePie: [ {c:[0,0.375,0], t:[0.335,0.750,0.670], yaw:0},
+                       {c:[0,0.375,0], t:[0.335,0.750,0.670], yaw:Math.PI/3},
+                       {c:[0,0.375,0], t:[0.335,0.750,0.670], yaw:2*Math.PI/3} ] },
+
+  goma: { ruta:"modelos/papeleria/stationery_supplies_1k.gltf",
+          nodo:"stationery_supplies_eraser", escala:28.58,
+          /* Un ladrillo: aquí una caja sola es exacta. */
+          dePie: [ {c:[0,0.150,0], t:[1.273,0.300,0.532]} ] },
+
+  /* El lápiz es un PUENTE, no un objeto: 13,5 m tumbado. La losa va sobre
+     la cresta como en el bidón tumbado. El ancho pisable es lo primero que
+     hay que medir en el laboratorio: un lápiz es hexagonal, así que su
+     lomo es plano de verdad y debería dar más que la cresta redonda de un
+     bidón — pero eso se comprueba, no se supone. */
+  lapiz: { ruta:"modelos/papeleria/stationery_supplies_1k.gltf",
+           nodo:"stationery_supplies_pencil_new_a", escala:69.45,
+           dePie: [ {c:[0,0.500,0], t:[13.466,0.100,0.300]} ] },
+
+  boli: { ruta:"modelos/papeleria/stationery_supplies_1k.gltf",
+          nodo:"stationery_supplies_pen_fancy", escala:38.72,
+          dePie: [ {c:[0,0.500,0], t:[5.083,0.100,0.260]} ] }
 };
 
 /* Medidas del modelo, en metros, para que el GENERADOR pueda colocar sin
@@ -663,11 +701,17 @@ const PROPS = {
 const PROP_DIM = {
   bidon: { ancho:0.563, alto:0.880, fondo:0.563 },
   silla: { ancho:0.639, alto:1.264, fondo:0.662 },
+  // ya escaladas: el modelo es diminuto y la escala vive en PROPS
+  cubilete: { ancho:0.748, alto:0.750, fondo:0.748 },
+  goma:     { ancho:1.273, alto:0.300, fondo:0.532 },
+  lapiz:    { ancho:13.466, alto:0.550, fondo:0.550 },
+  boli:     { ancho:5.083,  alto:0.550, fondo:0.388 },
 };
 /* A qué altura queda la cara pisable de cada objeto, contando desde su
    base. Son las que se eligieron en el laboratorio, no cotas del modelo:
    el asiento de la silla está a 0,585 aunque el respaldo suba a 1,26. */
-const PROP_PISA = { bidonPie:0.880, bidonTumbado:0.563, silla:0.585 };
+const PROP_PISA = { bidonPie:0.880, bidonTumbado:0.563, silla:0.585,
+                    cubilete:0.750, goma:0.300, lapiz:0.550, boli:0.550 };
 
 /* ═══════════════════════════════════════════════════════════════
    3 · Generador — mismas reglas que TorreGenerator.cs
@@ -1865,9 +1909,15 @@ function initWorld(){
    repetir la misma cuenta mil veces. */
 const PROPMOD = { bidon:null, bidonT:null, silla:null, cargando:false, listo:false };
 
-function prepararGeoProp(malla, tumbado){
+function prepararGeoProp(malla, tumbado, escala){
   const geo = malla.geometry.clone();
   geo.applyMatrix4(malla.matrixWorld);            // por si el .gltf trae transformadas
+  /* La escala se cuece AQUÍ, en la geometría, y no en la matriz de cada
+     copia: las piezas van por InstancedMesh y así todas las instancias
+     comparten una geometría ya del tamaño bueno, sin que cada matriz tenga
+     que llevar un factor de 69 que además complicaría los colisionadores
+     (que están escritos en metros de juego, no en metros de modelo). */
+  if (escala && escala !== 1) geo.scale(escala, escala, escala);
   if (tumbado) geo.rotateX(Math.PI/2);
   geo.computeBoundingBox();
   const bb = geo.boundingBox;
@@ -1893,7 +1943,7 @@ function buildMeshes(tower){
      ve entera desde el primer fotograma y los bidones aparecen cuando
      llegan, sin bloquear nada. Al terminar la descarga se vuelve a llamar
      aquí. */
-  const clavePropDe = (v) => v.prop === "bidon" ? (v.tumbado ? "bidonT" : "bidon") : "silla";
+  const clavePropDe = (v) => (v.prop === "bidon" && v.tumbado) ? "bidonT" : v.prop;
   const dibujable = (v) => v.shape !== "prop" || !!PROPMOD[clavePropDe(v)];
 
   const grupos = new Map();
@@ -4123,12 +4173,24 @@ function cargarProps(cb){
   }
   const cargador = new THREE.GLTFLoader();
   const fallos = [];
-  let quedan = nombres.length;
+
+  /* UNA DESCARGA POR ARCHIVO. La papelería trae nueve piezas en un mismo
+     .gltf y de ahí salen cuatro props, así que pedirlo una vez por prop
+     sería descargarlo una sola vez (el navegador lo cachea) pero
+     ANALIZARLO cuatro, y eso sí se paga: el análisis de un glTF con su
+     .bin y sus tres texturas no es gratis. Se agrupan por ruta. */
+  const porRuta = new Map();
+  for (const n of nombres){
+    const r = PROPS[n].ruta;
+    if (!porRuta.has(r)) porRuta.set(r, []);
+    porRuta.get(r).push(n);
+  }
+  let quedan = porRuta.size;
   const listo = () => { if (--quedan === 0){
     LAB.aviso = fallos.length ? "no cargó: " + fallos.join(", ") + " · ¿sirve /modelos/?" : "";
     cb();
   }};
-  for (const n of nombres) cargador.load(PROPS[n].ruta, (g) => {
+  for (const [ruta, deEsteArchivo] of porRuta) cargador.load(ruta, (g) => {
     const m = g.scene;
     /* Este juego renderiza con el outputEncoding por defecto (lineal) y
        toda su paleta estaba ajustada a eso, así que a las texturas de color
@@ -4146,27 +4208,48 @@ function cargarProps(cb){
     m.updateMatrixWorld(true);
 
     /* De la misma descarga salen las dos cosas: el contenedor que clona el
-       laboratorio y la geometría suelta que instancia la torre. Cargar el
-       archivo dos veces sería descargarlo una (el navegador lo cachea) pero
-       analizarlo dos, y eso sí se paga. */
-    let malla = null;
-    m.traverse(o => { if (o.isMesh && !malla) malla = o; });
-    if (malla){
-      if (n === "bidon"){
-        PROPMOD.bidon  = { geo: prepararGeoProp(malla, false), mat: malla.material };
-        PROPMOD.bidonT = { geo: prepararGeoProp(malla, true),  mat: malla.material };
-      } else {
-        PROPMOD[n] = { geo: prepararGeoProp(malla, false), mat: malla.material };
-      }
-    }
+       laboratorio y la geometría suelta que instancia la torre. */
+    for (const n of deEsteArchivo){
+      const P = PROPS[n];
+      /* Con `nodo` se elige la pieza por nombre; sin él, la primera malla,
+         que es como funcionaban el bidón y la silla (un archivo, una
+         pieza) y se deja igual para no tocar lo que ya va bien. */
+      let malla = null;
+      m.traverse(o => {
+        if (!o.isMesh || malla) return;
+        if (!P.nodo) { malla = o; return; }
+        // el nombre puede estar en la malla o en el nodo que la contiene
+        if (o.name === P.nodo || (o.parent && o.parent.name === P.nodo)) malla = o;
+      });
+      if (!malla){ fallos.push(n + " (nodo «" + P.nodo + "» no está)"); continue; }
 
-    const bb = new THREE.Box3().setFromObject(m);
-    const d = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3());
-    m.position.set(-c.x, -bb.min.y, -c.z);   // base al suelo, centrado en x,z
-    const cont = new THREE.Group(); cont.add(m);
-    LAB.modelos[n] = { obj:cont, d };
+      const k = P.escala || 1;
+      if (n === "bidon"){
+        PROPMOD.bidon  = { geo: prepararGeoProp(malla, false, k), mat: malla.material };
+        PROPMOD.bidonT = { geo: prepararGeoProp(malla, true,  k), mat: malla.material };
+      } else {
+        PROPMOD[n] = { geo: prepararGeoProp(malla, false, k), mat: malla.material };
+      }
+
+      /* La copia del laboratorio: se clona SOLO la pieza que toca (si no,
+         las cuatro de papelería saldrían con las nueve encima), se le
+         aplica la escala y se baja la base al suelo. */
+      const copia = malla.clone();
+      copia.geometry = PROPMOD[n === "bidon" ? "bidon" : n].geo;   // ya escalada y centrada
+      copia.position.set(0,0,0); copia.rotation.set(0,0,0); copia.scale.set(1,1,1);
+      copia.matrixAutoUpdate = true;
+      const cont = new THREE.Group(); cont.add(copia);
+      cont.updateMatrixWorld(true);
+      const bb = new THREE.Box3().setFromObject(cont);
+      const d = bb.getSize(new THREE.Vector3());
+      LAB.modelos[n] = { obj:cont, d };
+    }
     listo();
-  }, undefined, (e) => { console.error("[props] no cargó " + n + ":", e); fallos.push(n); listo(); });
+  }, undefined, (e) => {
+    console.error("[props] no cargó " + ruta + ":", e);
+    for (const n of deEsteArchivo) fallos.push(n);
+    listo();
+  });
 }
 
 /* Los objetos en la partida normal. Asíncrono a propósito: la torre se ve
@@ -4213,7 +4296,7 @@ function montarLab(){
     }
   };
 
-  caja(24,-0.5,0, 72,1,16, "hormigon", true);                    // suelo del banco
+  caja(38,-0.5,0, 100,1,16, "hormigon", true);                   // suelo del banco
 
   // ── BIDONES ─────────────────────────────────────────────────────────
   // 1 · de pie con la caja cuadrada de antes: 11,7 cm de aire en la esquina
@@ -4261,6 +4344,50 @@ function montarLab(){
     deProp(x, 0, PROPS.silla.respaldo);
     deProp(x, 0, PROPS.silla.patas);
   }
+
+  // ── PAPELERÍA ───────────────────────────────────────────────────────
+  /* Cuatro piezas de un mismo archivo, ya escaladas. Están aquí para
+     MIRARLAS y pisarlas antes de meterlas en el generador: los
+     colisionadores son provisionales, puestos por analogía con el bidón.
+     Lo que hay que juzgar en cada una:
+       · cubilete — ¿las tres cajas inscritas le valen, siendo hueco?
+       · goma     — es un ladrillo, debería ser exacta
+       · boli     — 5,1 m: ¿es un escalón largo o ya un puente corto?
+       · lápiz    — 13,5 m: ¿se anda por el lomo sin caerse? Es hexagonal,
+                    así que debería dar más ancho que la cresta redonda de
+                    un bidón, pero eso se mide aquí, no se supone. */
+  const CU = LAB.modelos.cubilete, GO = LAB.modelos.goma;
+
+  // 10 · cubilete: con su caja envolvente, para ver cuánto sobra en esquinas
+  placa(56,"oxido");   pon("cubilete",56,0,false);
+  caja(56, 0.375, 0, 0.748, 0.750, 0.748, null, true);
+
+  // 11 · cubilete con las tres cajas inscritas, como el bidón
+  placa(60,"galv");    pon("cubilete",60,0,false);
+  deProp(60, 0, PROPS.cubilete.dePie);
+
+  // 12 · goma: una sola caja y debería bastar
+  placa(64,"galv");    pon("goma",64,0,false);
+  deProp(64, 0, PROPS.goma.dePie);
+
+  // 13 · dos gomas separadas 2,8 m: es el escalón más bajo del juego (0,30)
+  for (const x of [68, 70.8]){ placa(x,"pintado"); pon("goma",x,0,false);
+    deProp(x, 0, PROPS.goma.dePie); }
+
+  // 14 · el boli, 5,1 m tumbado a lo largo de X
+  caja(76, 0.012, 0, 6.0, 0.024, 3.0, "oxido", false);
+  pon("boli",76,0,false);
+  deProp(76, 0, PROPS.boli.dePie);
+
+  /* 15 · EL LÁPIZ COMO PUENTE, que es para lo que se escaló así.
+     Dos pilares y 13,5 m de lápiz entre ellos, sin nada debajo: la única
+     forma de cruzar es andando por el lomo. Si el ancho pisable no da,
+     aquí se nota a la primera. */
+  const LX = 90, LY = 1.20;                    // centro y altura de la base
+  caja(LX - 7.4, LY/2 + 0.275, 0, 1.6, LY + 0.55, 2.4, "hormigon", true);
+  caja(LX + 7.4, LY/2 + 0.275, 0, 1.6, LY + 0.55, 2.4, "hormigon", true);
+  pon("lapiz", LX, LY, false, 0, 0);
+  deProp(LX, LY, PROPS.lapiz.dePie);
 
   /* ── MINITORRE ────────────────────────────────────────────────────
      Un nivel pequeño de verdad, ~11 m, construido solo con los dos props.
@@ -4390,6 +4517,11 @@ function pintarLab(){
     'SILLA &nbsp; ' + n(7) + '<span class="mal">una caja</span> · 68 cm de aire &nbsp; ' +
     n(8) + '<span class="bien">asiento + respaldo + 4 patas</span> &nbsp; ' +
     n(9) + 'salto de asiento a asiento<br>' +
+    'PAPELERÍA <span class="mal">(colisionadores provisionales)</span> &nbsp; ' +
+    n(10) + 'cubilete <span class="mal">envolvente</span> &nbsp; ' +
+    n(11) + 'cubilete <span class="bien">3 inscritas</span> &nbsp; ' +
+    n(12) + 'goma &nbsp; ' + n(13) + 'dos gomas · escalón de 0,30 &nbsp; ' +
+    n(14) + 'boli 5,1 m &nbsp; ' + n(15) + '<b>lápiz: puente de 13,5 m</b><br>' +
     tecla + ' alambres de colisión: <b>' + (LAB.verAlambres ? "sí" : "no") + '</b>' +
     ' &nbsp;·&nbsp; <span class="tec">Ctrl+Alt+B</span> salir' +
     filaPersona();

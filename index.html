@@ -571,7 +571,24 @@ function sepultado(lista, desde, x, y, z){
     const dxw = x - b.x, dzw = z - b.z;
     const c = Math.cos(b.yaw||0), s = Math.sin(b.yaw||0);
     const lx = dxw*c - dzw*s, lz = dxw*s + dzw*c;
-    if (Math.abs(lx) < b.hw + HX && Math.abs(lz) < b.hd + HZ)return true;
+    if (Math.abs(lx) >= b.hw + HX || Math.abs(lz) >= b.hd + HZ) continue;
+    /* LA MISMA REGLA QUE EN haTechado, y aquí faltaba desde el lote 22.
+       Atravesar no es enterrar. Quien decide es resolverCaja, que empuja
+       por la cara más cercana: si la salida barata es de lado, el jugador
+       se aparta unos centímetros y se queda a su altura; sólo si la salida
+       barata es hacia arriba acaba encima de la pieza y el salto calculado
+       deja de valer.
+       Sin esta comprobación, una PATA DE SILLA de 7 cm contaba como
+       enterramiento. Medido al meter la goma en el generador: 174 de 175
+       rechazos eran exactamente eso, y cada uno se comía los ocho
+       reintentos y acababa en una losa de rescate. Los rescates pasaban de
+       12 a 84 por 30 torres por culpa de unas patas de silla. */
+    const arribaEmpuje = (b.y + b.hh) - y;
+    const abajoEmpuje  = (y + 2*HY) - (b.y - b.hh);
+    const xEmpuje = (b.hw + HX) - Math.abs(lx);
+    const zEmpuje = (b.hd + HZ) - Math.abs(lz);
+    if (arribaEmpuje < abajoEmpuje && arribaEmpuje < xEmpuje
+        && arribaEmpuje < zEmpuje) return true;
   }
   return false;
 }
@@ -607,6 +624,17 @@ function arcoLibre(lista, desde, ax, ay, az, bx, by, bz){
     let libre = true;
     for (let i = 1; i <= 13 && libre; i++){
       const f = i/14, t = T*f;
+      /* El último tramo NO se mira, y esto es un arreglo de verdad y no un
+         apaño. Se muestrea hasta f=13/14, o sea que en un salto de 5 m el
+         último punto cae a 36 cm del destino — DENTRO de la pieza sobre la
+         que vas a aterrizar. El arco chocaba con su propio suelo.
+         Con el bidón y la silla apenas se notaba porque son estrechos; con
+         la goma, que mide 1,27 de largo y es plana, saltó a la vista: ella
+         sola multiplicaba los rescates por siete (de 12 a 84 en 30 torres)
+         mientras el cubilete y los lápices no movían la aguja.
+         Que quepas donde aterrizas ya lo comprueba aireSobre, que es su
+         trabajo; aquí sólo se mira el camino. */
+      if (d*(1-f) < 0.70) break;
       const h = alturaArco(t, modo);
       if (h < dy - 0.6) break;                 // esta trayectoria ya no llega
       const x = ax + (bx-ax)*f, z = az + (bz-az)*f;
@@ -1191,9 +1219,24 @@ function buildTower(seedStr, alturaObjetivo, difId){
        · silla         → asiento + respaldo + una caja por pata
      La conversión de coordenadas locales a mundo es la misma fórmula que
      usa el lab, y vive en un solo sitio para que no se cuelen los signos. */
-  const colisProp = (tipo, tumbado) =>
-    tipo === "bidon" ? (tumbado ? PROPS.bidon.tumbado : PROPS.bidon.dePie)
-                     : [PROPS.silla.asiento, PROPS.silla.respaldo, ...PROPS.silla.patas];
+  /* CUIDADO CON ESTA FUNCIÓN. Estuvo cableada a mano —«si es bidón, lo del
+     bidón; si no, lo de la silla»— y al entrar la papelería eso significó
+     que el cubilete, la goma y los dos lápices se colocaban con los
+     colisionadores DE LA SILLA: asiento, respaldo y cuatro patas, en el
+     sitio del lápiz. El objeto se veía donde tocaba y no había nada sólido
+     debajo, así que el jugador lo atravesaba y se caía 160 m.
+     Y despistó mucho antes de encontrarlo: las patas de silla aparecían en
+     mitad de la torre, en apoyos donde no había ninguna silla, y me
+     hicieron perseguir un fallo en la guardia de enterramiento que no
+     existía. Ahora se resuelve por la forma de la entrada en PROPS, no por
+     una lista de nombres. */
+  const colisProp = (tipo, tumbado) => {
+    const P = PROPS[tipo];
+    if (!P) return [];
+    if (P.dePie && P.tumbado) return tumbado ? P.tumbado : P.dePie;
+    if (P.asiento) return [P.asiento, P.respaldo, ...P.patas];
+    return P.dePie || [];
+  };
 
   const ponerProp = (tipo, x, yBase, z, giro, tumbado) => {
     visuals.push({ cx:x, cy:yBase, cz:z, sx:1, sy:1, sz:1, yaw:giro,
@@ -1208,11 +1251,54 @@ function buildTower(seedStr, alturaObjetivo, difId){
   };
   /* Sortea qué objeto toca. La silla tumbada no existe: no tendría dónde
      pisarse. El bidón sí, y cambia bastante cómo se salta encima. */
-  const sorteaProp = () => {
-    const r = rnd();
-    if (r < 0.42) return { tipo:"bidon", tumbado:false, pisa:PROP_PISA.bidonPie };
-    if (r < 0.70) return { tipo:"bidon", tumbado:true,  pisa:PROP_PISA.bidonTumbado };
-    return { tipo:"silla", tumbado:false, pisa:PROP_PISA.silla };
+  /* QUÉ OBJETO TOCA, y para qué papel.
+     Ya no vale un sorteo único: las piezas de papelería no sirven para lo
+     mismo que un bidón y meterlas en el mismo bombo daría torres raras.
+
+       · `piso` / `adorno` — peso en cada papel. Cero = no vale para eso.
+         Los lápices no son adorno: un lápiz de 13 m «decorando» una
+         plataforma no decora, la invade. Y el cubilete tampoco: mide 2,09
+         de alto y techaría el apoyo de al lado casi siempre.
+       · `desplaza` — cuánto se corre el CENTRO del objeto más allá del
+         apoyo, en la dirección en la que viene el jugador. Es lo que hace
+         que el apoyo caiga en el sitio bueno de la pieza y no en su medio:
+           · el cubilete se corre 0,94 para que el apoyo quede en el
+             BORDILLO y no sobre el agujero. Pasarte de salto te mete
+             dentro, que es la gracia, pero al que salta bien no se le
+             castiga.
+           · los lápices se corren casi media pieza para que el apoyo caiga
+             cerca de su punta y el cuerpo del lápiz quede POR DELANTE. Si
+             el apoyo fuera el centro, la mitad del lápiz quedaría debajo
+             de la trayectoria de llegada y arcoLibre lo rechazaría una y
+             otra vez.
+       · `alinea` — si la pieza se orienta con la dirección de llegada (los
+         lápices, para andar hacia delante por el lomo) o al azar. */
+  const CATALOGO = [
+    { tipo:"bidon", tumbado:false, pisa:PROP_PISA.bidonPie,      piso:26, adorno:26 },
+    { tipo:"bidon", tumbado:true,  pisa:PROP_PISA.bidonTumbado,  piso:19, adorno:20 },
+    { tipo:"silla", tumbado:false, pisa:PROP_PISA.silla,         piso:20, adorno:30 },
+    /* La goma es el escalón más bajo del juego: su cara pisable está a
+       0,30 del suelo. Estuvo a punto de quedarse fuera porque medía un
+       coste enorme —multiplicaba los rescates por cuatro— pero aquella
+       medida era falsa: venía del fallo de colisProp, que le estaba
+       poniendo los colisionadores de la SILLA. Con los suyos no cuesta
+       nada. La medición estaba bien hecha y aun así mentía, porque medía
+       un juego que tenía otro fallo debajo. */
+    { tipo:"goma",  tumbado:false, pisa:PROP_PISA.goma,          piso:0,  adorno:24 },
+    { tipo:"cubilete", tumbado:false, pisa:PROP_PISA.cubilete,   piso:12, adorno:0,
+      desplaza:0.94 },
+    { tipo:"lapizcorto", tumbado:false, pisa:PROP_PISA.lapizcorto, piso:7, adorno:0,
+      desplaza:2.32, alinea:true },
+    { tipo:"lapiz", tumbado:false, pisa:PROP_PISA.lapiz,         piso:4,  adorno:0,
+      desplaza:5.73, alinea:true }
+  ];
+  const sorteaProp = (esPiso) => {
+    const campo = esPiso ? "piso" : "adorno";
+    let total = 0;
+    for (const c of CATALOGO) total += c[campo];
+    let r = rnd() * total;
+    for (const c of CATALOGO){ r -= c[campo]; if (r <= 0) return c; }
+    return CATALOGO[0];
   };
 
   // ── Explanada ──
@@ -1237,8 +1323,8 @@ function buildTower(seedStr, alturaObjetivo, difId){
   /* Se guarda también DE DÓNDE se venía. Hace falta para juzgar un
      enterramiento: si una pieza nueva levanta este apoyo, la pregunta no es
      "¿lo ha tocado?" sino "¿se sigue llegando desde el apoyo anterior?". */
-  const reservar = (x, y, z, esProp) => {
-    const r = { x, y, z, prop: !!esProp };
+  const reservar = (x, y, z, esProp, tipo) => {
+    const r = { x, y, z, prop: !!esProp, tipo };
     reservas.push(r);
     if (reservas.length > 48) reservas.shift();
     /* Los escalones-objeto NO caducan a los 48 apoyos. Se probó con el
@@ -1320,6 +1406,9 @@ function buildTower(seedStr, alturaObjetivo, difId){
            deja de verse, y el jugador se planta 0,90 m por encima de donde
            el generador dijo. Que la torre siga siendo subible no lo
            arregla. */
+        if (window.__ESP){ window.__ESP.push({ tipo:r.tipo||"?",
+          sol:[+(b.hw*2).toFixed(2),+(b.hh*2).toFixed(2),+(b.hd*2).toFixed(2)].join("×"),
+          arriba:+(arriba-r.y).toFixed(2), abajo:+(abajo-r.y).toFixed(2) }); }
         rech.dentro++; return true;
       }
       for (const zc of zonasCornisa) if (invadeCampana(b, zc)) { rech.campana++; return true; }
@@ -1485,15 +1574,20 @@ function buildTower(seedStr, alturaObjetivo, difId){
     const tocaProp = CADA_PROP && !descanso && !monumento && --desdeProp <= 0;
     const propEsPiso = tocaProp && rnd() < 0.5;
     if (tocaProp) desdeProp = Math.max(6, Math.round(CADA_PROP * (0.55 + rnd()*0.9)));
-    const elProp = tocaProp ? sorteaProp() : null;
+    const elProp = tocaProp ? sorteaProp(propEsPiso) : null;
 
     for (let intento = 0; intento < 8 && !colocada; intento++){
       const nS = solids.length, nV = visuals.length;
       if (propEsPiso){
         /* El objeto ES el escalón: flotando, con su cara pisable justo a la
            altura que pedía el generador. Así el salto que ya estaba
-           calculado sigue valiendo tal cual. */
-        ponerProp(elProp.tipo, cx, y - elProp.pisa, cz, rnd()*Math.PI*2, elProp.tumbado);
+           calculado sigue valiendo tal cual.
+           El centro puede ir corrido respecto al apoyo (ver CATALOGO), y el
+           giro puede venir alineado con la llegada en vez de al azar. */
+        const d = elProp.desplaza || 0;
+        const giro = elProp.alinea ? -rumbo : rnd()*Math.PI*2;
+        ponerProp(elProp.tipo, cx + Math.cos(rumbo)*d, y - elProp.pisa,
+                  cz + Math.sin(rumbo)*d, giro, elProp.tumbado);
       } else {
         placePiece(rnd, addBox, addCyl, canto, monumento, descanso, dif,
                    cx, y, cz, -rumbo + Math.PI/2, ancho, GEN);
@@ -1503,7 +1597,23 @@ function buildTower(seedStr, alturaObjetivo, difId){
          de ellas y ninguna prueba se puso roja. */
       let vale = true;
       if (haTechado(nS)) { vale = false; }
-      else if (sepultado(solids, desdeSol, cx, y, cz)) { rech.dentro++; vale = false; }
+      else if (sepultado(solids, desdeSol, cx, y, cz)) {
+        if (window.__ESP2 && elProp && propEsPiso){
+          // ¿qué sólido lo entierra?
+          for (let q = desdeSol; q < solids.length; q++){
+            const bb = solids[q];
+            if (bb.y - bb.hh >= y - 0.05 || bb.y + bb.hh <= y + 0.05) continue;
+            const dx = cx-bb.x, dz = cz-bb.z, cc=Math.cos(bb.yaw||0), ss=Math.sin(bb.yaw||0);
+            if (Math.abs(dx*cc-dz*ss) < bb.hw+HX && Math.abs(dx*ss+dz*cc) < bb.hd+HZ){
+              window.__ESP2.push({ tipo:elProp.tipo, ultimo:q===solids.length-1,
+                desde:solids.length-1-q,
+                sol:[+(bb.hw*2).toFixed(2),+(bb.hh*2).toFixed(2),+(bb.hd*2).toFixed(2)].join("×"),
+                arriba:+(bb.y+bb.hh-y).toFixed(3), abajo:+(bb.y-bb.hh-y).toFixed(3) });
+              break;
+            }
+          }
+        }
+        rech.dentro++; vale = false; }
       else if (aireSobre(solids, desdeSol, cx, y, cz, 9) < AIRE_PISAR) { rech.aire++; vale = false; }
       else if (!arcoLibre(solids, desdeSol, px0, y-dy, pz0, cx, y, cz)) { rech.arco++; vale = false; }
       if (vale){ colocada = true; break; }
@@ -1546,15 +1656,26 @@ function buildTower(seedStr, alturaObjetivo, difId){
         rescates++; forzados++;
       }
     }
-    apoyos.push({x:cx, y:y, z:cz});
-    reservar(cx, y, cz, propEsPiso && colocada);
+    /* Se apunta en el apoyo QUÉ objeto hace de escalón. Antes la prueba lo
+       adivinaba buscando un prop con el mismo (x,z), y eso dejó de valer
+       en cuanto los objetos empezaron a colocarse CORRIDOS respecto a su
+       apoyo (el cubilete y los lápices). Mejor que lo diga el generador. */
+    apoyos.push(propEsPiso && colocada
+      ? {x:cx, y:y, z:cz, prop:elProp.tipo}
+      : {x:cx, y:y, z:cz});
+    reservar(cx, y, cz, propEsPiso && colocada, elProp && elProp.tipo);
     if (propEsPiso && colocada) propsPlataforma++;
 
     /* ADORNO: encima de la losa que se acaba de poner, apartado del centro
        para no estorbar el aterrizaje. Si no cabe o techa algo, simplemente
        no se pone: un adorno nunca puede costar una torre. */
     if (tocaProp && !propEsPiso && colocada){
-      const sep = Math.max(0.75, Math.min(ancho*0.42, 2.6));
+      /* La separación tenía un tope de 2,6 pensado para el bidón y la
+         silla, que miden medio metro. Ahora se parte del TAMAÑO de la
+         pieza: si no, un objeto ancho se planta encima del apoyo y el
+         rechazo por techado se lo come siempre. */
+      const medio = (PROP_DIM[elProp.tipo] ? PROP_DIM[elProp.tipo].ancho : 0.6) / 2;
+      const sep = Math.max(0.75, medio + 0.45, Math.min(ancho*0.42, 2.6));
       for (let k = 0; k < 6; k++){
         const ang = rnd()*Math.PI*2;
         const px2 = cx + Math.cos(ang)*sep, pz2 = cz + Math.sin(ang)*sep;
@@ -4324,7 +4445,10 @@ function prepararProps(){
   PROPMOD.cargando = true;
   cargarProps(() => {
     PROPMOD.cargando = false;
-    PROPMOD.listo = !!(PROPMOD.bidon && PROPMOD.silla);
+    /* «Listo» es que estén TODAS: si falta una, sus copias en la torre no
+       se dibujan y el jugador salta sobre un colisionador invisible. */
+    PROPMOD.listo = ["bidon","bidonT","silla","goma","cubilete","lapiz","lapizcorto"]
+      .every(k => !!PROPMOD[k]);
     if (PROPMOD.listo && G.tower) buildMeshes(G.tower);   // ahora sí se dibujan
   });
 }
@@ -5110,7 +5234,7 @@ if (/\bdebug\b/.test(location.hash)){
   window.__T = { G, CAPS, AV, W, play, respawn, Net, Perf, buildMeshes,
                  Snd, Ajustes, CALIDADES, pintarAjustes, avisoHUD,
                  Marcas, semillaDelDia, fechaUTC, alternarDia, pintarDifs, fmtMarca,
-                 DIST:()=>DIST_ROBOT,
+                 DIST:()=>DIST_ROBOT, arcoLibre, aireSobre, sepultado, alturaArco,
                  nubes:(v)=>{ W.clouds.forEach((c,i)=>{ c.userData.op0=[0.46,0.32,0.22][i]*v; }); _cicloP=-9; },
                  FASES, aplicarCielo, progresoCielo, faseActual,
                  regenerate, buildTower, indexarTorre, doJump, JumpMath, MURO_ALTO,

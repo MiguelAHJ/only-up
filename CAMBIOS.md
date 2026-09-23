@@ -1,3 +1,155 @@
+# Cambios — 23 de septiembre de 2026 (vigesimocuarto lote): papelería en MEDIA y DIFÍCIL
+
+Cuatro piezas nuevas de un modelo CC0 de papelería, ya probadas en el
+laboratorio y ahora colocadas por el generador. Y un fallo de fondo que
+llevaba escondido desde que existen los objetos.
+
+## Las cuatro piezas
+
+| | modelo real | escala | queda en | papel |
+|---|---|---|---|---|
+| cubilete | 8,4 cm | ×25 | 2,09 × 2,09 × 2,09 | escalón |
+| goma | 4,5 × 1 × 1,9 cm | ×28,6 | 1,27 × 0,30 × 0,53 | adorno |
+| lápiz corto | 9,4 cm | ×70,5 | 6,63 m de largo | escalón |
+| lápiz | 19,4 cm | ×69,5 | 13,47 m de largo | escalón |
+
+Ninguna escala se eligió a ojo: el cubilete y la goma por la ALTURA a la
+que quedan, los lápices por el GROSOR, que es lo que decide si se puede
+andar por encima. Texturas: 1.799 KB de JPG → **71 KB** en WebP de 512.
+
+### El cubilete es un sitio donde caerse
+
+Es la pieza con mecánica propia. Anillo de doce sectores más un fondo de
+tres cajas: saltas, caes dentro, y para salir hay que subirse al bordillo
+—y desde el bordillo sales más alto, que es para lo que sirve.
+
+La escala la manda esa mecánica y no el parecido con un bidón. El hueco
+tiene **1,90 m de hondo y un salto simple sube 2,20**. A escala 28 el hueco
+se quedaría en 2,12 y sería una ratonera; a 25 se sale de un salto.
+
+Medido saltando desde el fondo en 8 direcciones y 13 empujes: con un empuje
+suave (15-20% de la carrera) se acierta el bordillo en el **100% de las
+direcciones**. Pasarse de empuje no te encierra, te deja fuera — ojo, que
+en la torre «fuera» es el vacío.
+
+### Los objetos se colocan CORRIDOS respecto a su apoyo
+
+Esto es nuevo y hacía falta. Antes el objeto se centraba en el apoyo; ahora
+puede correrse en la dirección por la que llega el jugador:
+
+- el **cubilete** se corre 0,94 para que el apoyo caiga en el bordillo y no
+  sobre el agujero. Al que salta bien no se le castiga; al que se pasa, se
+  le mete dentro.
+- los **lápices** se corren casi media pieza para que el apoyo caiga cerca
+  de su punta y el cuerpo quede POR DELANTE. Si el apoyo fuera el centro,
+  media pieza quedaría debajo de la trayectoria de llegada y `arcoLibre` la
+  rechazaría una y otra vez. Además van alineados con la dirección de
+  llegada: aterrizas en la punta y andas hacia delante por el lomo.
+
+Y van **solos**, sin plataformas en los extremos, como pediste.
+
+## El fallo que llevaba meses escondido
+
+`colisProp` decidía los colisionadores así:
+
+```js
+tipo === "bidon" ? (…lo del bidón…) : (…lo de la SILLA…)
+```
+
+Con dos objetos funcionaba. Al entrar la papelería, eso significó que **el
+cubilete, la goma y los dos lápices se colocaban con el asiento, el
+respaldo y las cuatro patas de una silla**, en el sitio del lápiz. El
+objeto se veía donde tocaba y no había nada sólido debajo: el jugador lo
+atravesaba y se caía 160 m.
+
+Ahora se resuelve por la FORMA de la entrada en `PROPS`, no por una lista
+de nombres.
+
+### Y lo caro no fue el fallo, fue lo que me hizo creer
+
+Antes de encontrarlo pasé por esto, y lo dejo escrito porque es la parte
+que enseña algo:
+
+1. Medí el coste de cada pieza por separado. Salió que **la goma
+   multiplicaba los rescates por cuatro** (de 12 a 84 por 30 torres)
+   mientras el cubilete y los lápices no movían la aguja.
+2. Los contadores decían que el culpable era `rech.dentro`, la guardia de
+   enterramiento del lote 22. Le añadí la regla de penetración mínima que
+   le faltaba de verdad — un arreglo bueno, y los rechazos cayeron de 373 a
+   12.
+3. Pero el rechazo se mudó a `aire`, de 2 a 353. Instrumenté para ver qué
+   sólido estorbaba y salió: **una pata de silla de 7 cm**. 174 de 175.
+4. Patas de silla en mitad de la torre, en apoyos donde no había ninguna
+   silla. Ahí estaba el fallo de verdad.
+
+Así que decidí apartar la goma con una medición **bien hecha y aun así
+falsa**: medía un juego que tenía otro fallo debajo. Con los colisionadores
+correctos, la goma no cuesta nada.
+
+El arreglo de `sepultado` se queda: hacía falta igualmente, y ahora está
+escrito por qué. Atravesar no es enterrar — contra una pata de 7 cm el
+motor te aparta tres centímetros y sigues a tu altura.
+
+## Cuánto salen y cuánto cuestan
+
+| | MEDIA | DIFÍCIL |
+|---|---|---|
+| objetos por torre | 21 | 23 |
+| variantes distintas | 7 de 7 | 7 de 7 |
+| la más repetida | 28% | 26% |
+| separación mediana | 68 m | 73 m |
+| llamadas de dibujo | **7** (eran 3) | 7 |
+
+Pesos de escalón: bidón de pie 26, bidón tumbado 19, silla 20, cubilete 12,
+lápiz corto 7, lápiz largo 4. La goma sólo de adorno.
+
+## Lo que esto cuesta, y que no se va a disimular
+
+Los arcos cortados en MEDIA suben. Medido con 40 semillas:
+
+| | línea base | con papelería |
+|---|---|---|
+| arcos cortados, MEDIA | 4 de 40 torres | **6 de 40** |
+| arcos cortados, DIFÍCIL | 2 | 3 |
+| rescates, MEDIA (60 semillas) | 16 | 24 |
+
+`generador.js` pasa con sus 25 semillas de siempre, pero con 40 la MEDIA se
+queda en 6 contra un umbral de 5. No lo tapo bajando pesos: lo probé
+—cubilete 9, corto 5, largo 3— y salió **peor** (8 de 40), que es la señal
+de que los pesos no son la palanca.
+
+Y sé qué los corta, porque lo medí: **los pretiles de las plataformas**,
+piezas de 6 cm de grueso y 1 m de alto que ya estaban. Los objetos nuevos
+no cortan ningún arco; lo que hacen es cambiar el trazado de la torre y
+destapar más pretiles de los que ya había. La línea base misma está en 4
+contra un umbral de 5, o sea que el problema ya estaba ahí y este lote lo
+empuja por encima de la raya.
+
+**Eso es un lote propio**, y queda apuntado como tal.
+
+## Pruebas
+
+- `test/papeleria.js` (nuevo): las medidas grabadas, estar de pie a lo
+  largo del lápiz corto de punta a punta, caer dentro del cubilete sin
+  colarse por ningún hueco, salir de un salto y estar de pie en el
+  bordillo.
+- `test/props.js`: al día con las siete variantes. El detector de
+  escalones-objeto ya no adivina por coincidencia de (x,z) —dejó de valer
+  con las piezas corridas—, ahora **lo apunta el generador** en el apoyo.
+  Y el cubilete admite dos finales buenos: bordillo o fondo.
+- `48 de 48` escalones-objeto aguantan al jugador con la física del juego.
+
+Regresión: generador, cámara, personaje, gestos, instanciado, lote 23 y
+objetos, todo en verde.
+
+## Archivos tocados
+
+- `index.html` — catálogo de objetos, colocación corrida, `colisProp`,
+  `sepultado`, estaciones 10-15 del laboratorio
+- `modelos/papeleria/` — modelo CC0 de Poly Haven con las texturas en WebP
+
+---
+
 # Cambios — 23 de septiembre de 2026 (vigesimotercer lote): sonido, ajustes, récords y la torre del día
 
 Te pasé una lista de recomendaciones y me dijiste que las hiciera todas menos

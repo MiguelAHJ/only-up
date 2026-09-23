@@ -349,6 +349,12 @@ function repartir(sala) {
   const p = [...sala.jugadores.values()].map((j) => ({
     id: j.id, name: j.name, color: j.color,
     x: j.x, y: j.y, z: j.z, ry: j.ry, best: j.best,
+    /* Animación y gesto, empaquetados por el cliente en un solo entero.
+       El relay no lo interpreta, sólo lo reparte — igual que la posición.
+       Va aquí y no en un mensaje aparte para no romper la comparación de
+       más abajo: quieto, este número no cambia, así que una sala de gente
+       parada sigue bajando a un reparto por segundo. */
+    a: j.a,
   }));
   const msg = JSON.stringify({ t: "state", p });
 
@@ -437,7 +443,7 @@ wss.on("connection", (ws, req) => {
         id,
         name: texto(d.name, "escalador", 14),
         color: texto(d.color, "#4FD1C5", 9),
-        x: 0, y: 0, z: 0, ry: 0, best: 0,
+        x: 0, y: 0, z: 0, ry: 0, best: 0, a: 0,
         visto: Date.now(),
         entrada: Date.now(),         // solo para el panel: "dentro hace 8 min"
         ws,
@@ -462,6 +468,7 @@ wss.on("connection", (ws, req) => {
       if (!j) return;
       j.x = num(d.x); j.y = num(d.y); j.z = num(d.z);
       j.ry = num(d.ry); j.best = num(d.best);
+      j.a = num(d.a) & 0x3FFF;          // 14 bits: velocidad, aire, gesto, contador
       j.visto = Date.now();
     }
   });

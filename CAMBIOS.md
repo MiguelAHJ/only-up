@@ -1,3 +1,652 @@
+# Cambios — 23 de septiembre de 2026 (vigesimosegundo lote): el bidón y la silla en la torre
+
+Miguel: «en media y difícil añade también el barril y la silla que ya teníamos
+previstos, que salgan cada tanto, que no sean tan repetitivos tampoco».
+
+Hechos. Y de paso salió un fallo del generador que no sabíamos que estaba.
+
+## Qué aparece y cada cuánto
+
+| | FÁCIL | MEDIA | DIFÍCIL |
+|---|---|---|---|
+| objetos por torre | **0** | 20,8 | 23,1 |
+| haciendo de escalón | — | 49 % | 50 % |
+| de adorno | — | 51 % | 50 % |
+| separación mediana entre uno y otro | — | **69 m** | **71 m** |
+| el par más cercano de toda la tanda | — | 19,8 m | 14,9 m |
+
+FÁCIL se queda limpia a propósito: es donde se aprende a saltar y no conviene
+meter ruido.
+
+Hay tres piezas, sorteadas: **bidón de pie** (42 %), **bidón tumbado** (28 %)
+y **silla** (30 %). El bidón tumbado cambia bastante cómo se salta encima, por
+eso está. La silla tumbada no existe: no tendría dónde pisarse.
+
+Mitad escalón y mitad adorno, y eso es deliberado. Si un bidón fuera siempre
+escalón acabaría siendo un cartel de «aquí se salta» y dejaría de sorprender;
+si fuera siempre atrezo, no serviría de nada. Nunca salen en los descansos ni
+en los monumentos, que están justamente para respirar.
+
+«Que no sean tan repetitivos» se acabó ajustando **por resultado, no por
+fórmula**: el contador no baja en los pasos de cornisa ni de sendero (esos
+`continue`), así que el número que se escribe en la configuración no es el que
+sale. Con 25 pedidos salían 9-12 por torre. Está puesto en 15 (MEDIA) y 9
+(DIFÍCIL) porque es lo que da los ~21 y ~23 de la tabla.
+
+## Lo que cuesta dibujarlos
+
+22 objetos en una torre de DIFÍCIL → **3 llamadas de dibujo**. Van por
+`InstancedMesh`, uno por geometría (bidón de pie, bidón tumbado, silla), igual
+que el resto de la torre.
+
+Las texturas venían a **3.016 KB**. Convertidas a WebP de 512 px: **324 KB**,
+un 89 % menos, y en pantalla no se distingue. Los `.gltf` llevan reescritas
+las rutas y los tipos.
+
+## El fallo que apareció por el camino
+
+La prueba con la física del juego —dejar caer al jugador sobre el objeto y
+mirar dónde se queda de pie— daba **47 de 48**. Uno no: MEDIA, semilla
+20261005, bidón tumbado. Esperaba los pies a 411,72 y quedaban a **413,03**,
+1,31 m más arriba.
+
+No era la física. El bidón estaba **enterrado dentro de una losa** de
+7,5 × 8,2 m que iba de 410,45 a 413,03. El escalón se anotaba en la tapa del
+bidón, pero la superficie de verdad era la de la losa. El objeto ni se veía.
+
+Y esto destapa un agujero del lote 20. Allí se añadió `aireSobre`, que busca
+**la primera cara de abajo** que quede por encima de los pies. Si una pieza
+gruesa **contiene** el apoyo —cara de abajo por debajo de los pies, cara de
+arriba por encima— no tiene ninguna cara que ofrecer, y el punto pasa como
+despejado. **Techar y sepultar son cosas distintas.** Faltaba la segunda.
+
+### Dos intentos que costaron más de lo que arreglaban
+
+No lo cuento por adorno, lo cuento porque las cifras mandan:
+
+1. **Rechazar que la caja del jugador tocase nada.** Rechazaba el 3 % de los
+   apoyos; los rescates pasaron de 13 a **104** y los arcos cortados de 0 a
+   **11** en DIFÍCIL. Al instrumentarlo, los 512 rechazos de 6 torres eran
+   **todos** postes y cantos de la propia plataforma —piezas de 0,26 × 0,88 m
+   con la base justo a la altura de los pies—. Contra uno de ésos no te
+   entierras: te apartas 10 cm.
+
+2. **Rechazar toda intersección de verdad.** 227 apoyos tocados en 16 torres,
+   de los que el motor sólo rompía **79**. Coste: rescates de 7 a **168** y
+   arcos cortados de 1 a **30**. Se pagaba tres veces por lo que valía una.
+
+La diferencia entre los que rompen y los que no la decide `resolverCaja`, que
+empuja por la **cara más cercana**: si la salida barata es de lado, el jugador
+se aparta y se queda a su altura; si es hacia arriba, aparece encima de la
+pieza —mediana medida: **1,25 m** más alto— y el salto que el generador había
+dado por bueno deja de valer. Ése es el criterio que se usa ahora, y es el del
+motor, no uno inventado para la ocasión.
+
+### Lo que quedó puesto
+
+Dos comprobaciones, en los dos sentidos del tiempo:
+
+- **`sepultado`** — al colocar un apoyo, que no se meta dentro de materia que
+  ya estaba. Salta 11 veces en 75 torres (23.765 llamadas). Poco, pero no
+  cero, así que se queda.
+- **`haTechado`, rama nueva** — al colocar una pieza, que no entierre un
+  apoyo ya ganado. Aquí el apoyo estaba y la materia llega después, que es
+  justo el caso del bidón.
+
+Acotada a los **escalones-objeto**, por el coste medido de arriba. En un bidón
+el rechazo es barato: la pieza es pequeña y siempre hay otro sitio. Y esos
+apoyos **no caducan** a los 48 como los demás: la losa que enterraba el de la
+semilla 20261005 se coloca mucho más tarde, y con el plazo normal el fallo
+seguía ahí (sólo bajaba de 1,31 m a 0,90 m, que era otra losa).
+
+También me equivoqué a mitad de camino dejando pasar el enterramiento «si
+desde el apoyo anterior aún se llega». Sonaba razonable y era falso: un bidón
+metido dentro de una plataforma **no se ve**, y que la torre siga siendo
+subible no lo arregla. Esa escapatoria está quitada.
+
+Resultado: **48 de 48**.
+
+## Que nada de lo anterior se rompió
+
+| | antes | después |
+|---|---|---|
+| apoyos sin sitio para estar de pie | 0 de 47.442 | **0 de 47.442** |
+| saltos imposibles por distancia | 0 | **0** |
+| arcos cortados (MEDIA, 25 torres) | 1 | **2** |
+| arcos cortados (DIFÍCIL, 25 torres) | 0 | **0** |
+| rescates (MEDIA / DIFÍCIL, 25 torres) | 7 / 14 | **12 / 14** |
+| cornisas superadas | 539/539 | **539/539** |
+| steppers superados | 1332/1332 | **1332/1332** |
+| senderos recorridos (MEDIA / DIFÍCIL) | 98,5 % / 97,0 % | **98,5 % / 97,0 %** |
+| generar una torre de DIFÍCIL | 69 ms | **69 ms** |
+
+La cima se sigue alcanzando con la física del juego en las tres dificultades,
+y la misma semilla sigue dando la misma torre.
+
+## Dos pruebas que había que poner al día
+
+- **`instancias.js`** se puso roja por 22 piezas de diferencia. No era el
+  juego: es una prueba anterior a los objetos, que compara matrices
+  `position/rotation/scale` y los objetos no se transforman así (su geometría
+  ya viene girada y bajada a base y=0). Ahora los deja fuera **y comprueba que
+  el número cuadre**, para que un objeto colado por la rama de cajas se note.
+- **`props.js`** tenía un agujero: en una foto cenital un bidón tumbado no se
+  distingue de uno de pie. Se mide la geometría preparada: **0,563 × 0,563 ×
+  0,88 con la base en y=0**, o sea el eje largo en horizontal y de alto el
+  diámetro, que es lo que promete `PROP_PISA.bidonTumbado`.
+
+## Lo que NO está arreglado
+
+Hay que decirlo con todas las letras: **los apoyos normales siguen pudiendo
+quedar dentro de una losa colocada después.** Medido sin la guardia son **79
+de 15.014 apoyos en 16 torres** —unos 5 por torre— y el motor deja al jugador
+una mediana de 1,25 m más arriba. Casi todos se suben y se sigue jugando, y
+aplicarles la guardia cuesta lo que cuenta el apartado de arriba. Queda
+apuntado como pendiente, no fingido como resuelto.
+
+Sigue pendiente de antes: ~2,3 % de los rebotes de DIFÍCIL que el piloto de
+velocidad constante no completa, el `outputEncoding` en sRGB para todo el
+juego, y que el robot mide 1,18 m de ancho contra los 0,70 del colisionador.
+
+## Archivos tocados
+
+- `index.html` — objetos en MEDIA y DIFÍCIL, `sepultado`, rama de
+  enterramiento en `haTechado`
+- `modelos/` — bidón y silla con las texturas en WebP de 512
+
+---
+
+# Cambios — 23 de septiembre de 2026 (vigesimoprimer lote): el giro de cámara que te tiraba
+
+Miguel: «de vez en cuando, saltando, la cámara hace un giro inesperado, como
+si la vista apuntara a otro lado, y eso hace que los jugadores se caigan».
+
+Reproducido, medido y parado.
+
+## Qué pasaba
+
+El manejador del ratón no tenía **ningún** límite:
+
+```js
+G.yaw -= e.movementX*0.0022;
+```
+
+Con esa sensibilidad, **un solo evento con un delta grande gira la cámara
+media vuelta**. Medido contra el manejador de verdad, no en teoría:
+
+| un evento de | gira |
+|---|---|
+| 400 px | 50° |
+| 1.200 px | **151°** |
+| 3.000 px | 378° |
+
+Si eso te pilla en el aire, te cambia la dirección de la carrera a mitad de
+salto. Y te caes.
+
+## De dónde salen esos deltas
+
+No de un sitio, de varios — y por eso el arreglo no intenta quitar el origen,
+sino aguantar el golpe:
+
+**La ventana del bloqueo, que está en nuestro código.** En `mousedown` se
+pone `dragging = true` y se pide `lock()`, que es **asíncrono**. Entre esas
+dos cosas hay unos fotogramas leyendo deltas SIN bloqueo del puntero, justo
+mientras el navegador desplaza el cursor para bloquearlo. Ese desplazamiento
+llega como un `movementX` enorme.
+
+**Ratones y controladores que sueltan valores absurdos.** Está documentado en
+juegos web: un hilo de PlayCanvas con exactamente este síntoma terminó siendo
+el ratón del usuario soltando deltas disparatados — con otro ratón
+desaparecía, y en Firefox no pasaba. Eso no se arregla desde el juego; sólo
+se puede aguantar.
+
+## El arreglo
+
+Dos filtros, y los dos con un número razonado detrás:
+
+- **260 px por evento.** Un giro humano muy rápido —media vuelta en 150 ms a
+  125 Hz de sondeo— son unos 75 px por evento. 260 es más de tres veces eso,
+  y equivale a 33 grados de un tirón, que ninguna mano produce en un solo
+  evento. Lo que pasa de ahí se descarta entero.
+- **120 ms de gracia tras conseguir el bloqueo**, que es cuando llega el
+  desplazamiento del cursor.
+
+Y lo que **no** se ha tocado: la sensibilidad, el tope del cabeceo, y que
+perder el puntero siga pausando la partida. Un giro brusco de verdad —20
+eventos de 75 px, 189 grados— pasa exactamente igual que antes.
+
+### El contador, que es la mitad del arreglo
+
+Los descartes se cuentan y salen en el HUD como **CÁMARA n**, y sólo aparece
+si ha pasado algo: un contador siempre a cero es ruido.
+
+Esto importa porque **no pude reproducir tu caso concreto desde aquí**. Puedo
+demostrar que el juego ya aguanta cualquier delta absurdo, pero no de dónde
+salía el tuyo. Con el contador, la próxima vez hay dato en vez de impresión:
+
+- si vuelve a pasar y **CÁMARA sube**, era esto y ahora está parado;
+- si vuelve a pasar y **CÁMARA sigue a cero**, era otra cosa y hay que buscar
+  en otro sitio, no aquí;
+- y si CÁMARA sube **jugando normal**, sin ningún tirón raro, entonces el
+  límite de 260 px se queda corto para tu ratón y hay que subirlo.
+
+## El camino táctil se queda como está
+
+Se miró y no hace falta: ahí el delta es movimiento real del dedo, `touchmove`
+va a ~60 Hz independientemente de los fotogramas, y la posición anterior se
+actualiza en cada evento. Un delta de 400 px exigiría mover el dedo 400 px en
+16 ms. La mano no da para tanto.
+
+## Cómo se ha comprobado
+
+`test/camara.js`: 14 comprobaciones contra el manejador real, despachando
+eventos de ratón de verdad en `document`.
+
+Rompiendo el arreglo a propósito:
+
+| lo que se rompió | fallos |
+|---|---|
+| quitar el límite por evento | 4 |
+| bajar el límite a 50 px (se come un giro brusco real) | 1 |
+| quitar la gracia tras bloquear | 1 |
+
+Esa última no fallaba al principio, y es la lección del lote otra vez: la
+comprobación usaba un delta de 900 px, que el límite de 260 caza igual, así
+que no distinguía las dos cosas. **Quité la gracia y la prueba siguió verde.**
+Ahora hay una comprobación con 200 px —por debajo del límite— que sólo puede
+parar la gracia. Es el mismo error que con los guardias del generador en el
+lote anterior: si no la has visto fallar, no sabes si sirve.
+
+## Archivos tocados
+
+- `index.html` — el filtro del ratón, el contador y su indicador en el HUD
+
+---
+
+# Cambios — 23 de septiembre de 2026 (vigésimo lote): la torre se podía cortar, y la cima era inalcanzable
+
+Miguel reportó dos semillas donde había que rendirse: un stepper debajo de
+una losa gigante, y un salto a una plataforma con un piso encima. Buscando
+eso apareció algo más grande.
+
+## Lo que había: una demostración plana
+
+El generador demostraba que una torre era subible con dos números —el hueco
+horizontal y la subida— y los dos son **planos**. Ninguno mira lo que hay
+ENCIMA de donde aterrizas, ni por dónde pasa el salto.
+
+### La cima era inalcanzable en la práctica totalidad de las torres
+
+```js
+y += 2.4;
+addBox(cx, y-0.7, cz, 10,1.4,10, 0, "pintado", true);
+```
+
+La losa de la cima, 10×10 y 1,4 m de grueso, se plantaba **justo encima de
+la última plataforma**, en el mismo (x,z). Eso deja **exactamente 1,00 m de
+aire** sobre ella —medido en 40 semillas, siempre 1,00— cuando hacen falta
+1,70 sólo para estar de pie.
+
+No es una deducción: plantando al jugador ahí, `resolverCaja` **lo expulsa
+70 cm hacia abajo**, atravesando el suelo (pies a 800,03 en vez de 800,73).
+Y para subirse había que salir de una sombra de 5 m en todas direcciones
+estando aplastado contra el techo.
+
+| | cimas alcanzables (40 semillas) |
+|---|---|
+| FÁCIL | **0 de 40** |
+| MEDIA | 4 de 40 |
+| DIFÍCIL | 4 de 40 |
+
+Probando con el motor —12 apoyos × 16 rumbos × 4 tiempos de doble salto— no
+se llegaba en ninguna de las tres. **Nadie había terminado una torre nunca.**
+
+### Y a media torre, plataformas donde no cabes
+
+Apoyos sin un solo sitio donde ponerse de pie (no el centro: **ninguno** de
+la plataforma): 1 de cada 560 en MEDIA, 1 de cada 883 en DIFÍCIL. Eso es una
+o dos por torre. Es exactamente la captura de Miguel.
+
+La causa: existía un mecanismo de "no techar", pero sólo protegía cornisas,
+sólo recordaba las 10 últimas y —lo peor— al tercer intento se rendía:
+
+```js
+if (!choca || intento === 2){ colocada = true; break; }
+```
+
+## Lo que se ha hecho
+
+Tres comprobaciones nuevas, en `2b · ESPACIO LIBRE`:
+
+- **`aireSobre`** — cuánto aire libre hay sobre un punto, con la caja del
+  jugador y la misma convención de giro que `resolverCaja`.
+- **`alturaArco`** — la altura del salto en el instante *t*, en tres formas
+  de cruzar un hueco: dejarse caer, un salto, o los dos. El segundo salto se
+  modela en el vértice del primero, que es la trayectoria **más plana** que
+  gana esa altura: la que menos se da en la cabeza.
+- **`arcoLibre`** — si alguna de las tres trayectorias pasa sin chocar. Basta
+  con que UNA esté libre: el jugador elige, y rechazar un salto porque una de
+  las tres choca sería rechazar saltos perfectamente posibles.
+
+Con eso, el guardia del bucle pasa de proteger cornisas a proteger **todo**:
+los últimos 48 apoyos y los últimos 10 saltos. Una losa colocada después ya
+no puede techar un apoyo de hace tres pasos ni partir por la mitad un salto
+que ya se había dado por bueno.
+
+Y cuando no hay sitio: ocho intentos girando (y a partir del quinto, también
+más cerca y más bajo), luego una losa pequeña en un hueco despejado. Nunca
+más "coloca igual aunque choque".
+
+La cima se coloca ahora **como cualquier otro paso**: apartada, con subida y
+hueco que pasan las mismas comprobaciones, y verificando que el arco pasa por
+encima del borde de su propia losa en vez de estamparse contra el canto.
+
+## Los números, antes y después
+
+| | antes | ahora |
+|---|---|---|
+| apoyos sin sitio para estar de pie | 1 de cada 560 (MEDIA) | **0 de 90.000** |
+| torres con al menos uno | 100% | **0%** |
+| cimas alcanzables (FÁCIL) | 0 de 40 | **40 de 40** |
+| llegar a la cima con la física | no, en ninguna dificultad | **sí, en las tres** |
+| saltos imposibles por distancia | 0 | 0 |
+| generar una torre DIFÍCIL | ~60 ms | 71 ms |
+
+Y lo que no se rompió: cornisas superadas 99,6 %, **steppers 1222/1222 =
+100 %**, senderos 96,7 % (MEDIA) y 98,1 % (DIFÍCIL), rebotes 98,4 %. Las
+mecánicas especiales siguen apareciendo en la misma cantidad.
+
+El precio: el generador rescata con una losa pequeña 7 veces cada 25 torres
+en MEDIA y 11 en DIFÍCIL. Piezas forzadas rectas hacia arriba: **0**.
+
+**Todas las semillas dan ahora torres distintas.** No hay forma de arreglar
+esto sin cambiar la geometría, y las de antes no se podían terminar.
+
+## Una comprobación que resultó ser adorno
+
+Puse tres guardias en la colocación normal: que no techara a nadie, que en el
+apoyo nuevo cupiera de pie, y que el arco del salto nuevo estuviera libre.
+Después quité los dos últimos a propósito para ver la prueba en rojo… **y no
+se puso roja**.
+
+Así que los instrumenté y conté cuántas veces rechaza cada uno, en 40
+semillas por dificultad:
+
+| | techa un apoyo | campana de cornisa | corta un salto | sin aire arriba | arco nuevo |
+|---|---|---|---|---|---|
+| FÁCIL | 785 | 0 | 0 | **0** | **0** |
+| MEDIA | 536 | 76 | 0 | **0** | **0** |
+| DIFÍCIL | 355 | 375 | 32 | **0** | **0** |
+
+Los dos últimos no disparan nunca, y la razón es buena: **la torre sólo
+sube**. Un apoyo nuevo no puede aparecer debajo de algo ya construido. Lo que
+trabaja es el guardia de lo que YA está: las piezas nuevas tapando lo viejo.
+
+Se quedan puestos —son baratos y son la red si algún día el generador baja o
+se ensancha— pero ahora está escrito, y el contador lo demuestra en vez de
+que alguien se lo crea. Y la columna "corta un salto" se gana el sitio sola:
+los 32 rechazos de DIFÍCIL son los que bajan los arcos cortados de 27 a 2 por
+cada 40 torres.
+
+## Un 100% que no era verdad
+
+El primer detector decía que el **100 %** de las torres tenía apoyos
+techados, en las tres dificultades. Era falso: un monumento levanta 2 a 4
+columnas de 4 a 13 m **sobre su propia plataforma**, y el punto de apoyo está
+en el centro. Estaba contando una columna como si fuera un techo.
+
+El jugador no necesita pisar el centro: le vale cualquier sitio de la
+plataforma. El detector bueno tiene dos fases —el punto exacto como filtro
+barato, y una rejilla de 0,25 m por toda la plataforma como veredicto— y el
+informe de la torre usa el mismo criterio. Sin eso, el número que sale es
+alarmante y no significa nada.
+
+## Cómo se ha comprobado
+
+`test/generador.js`: 24 comprobaciones. Que ningún apoyo se quede sin sitio,
+que no haya saltos imposibles, que la cima se coloque bien, que casi ningún
+arco quede cortado, que no haga falta forzar piezas — y la cima probada **con
+el motor del juego**: que no te expulse de la última plataforma y que se
+llegue arriba de verdad. Más determinismo: la misma semilla sigue dando la
+misma torre.
+
+Rompiendo el generador a propósito: devolver la cima a su sitio de antes →
+**9 fallos** (los tres techados, y el motor expulsando al jugador en las tres
+dificultades).
+
+`verifica-media.js` y `verifica-dificil.js` siguen pasando, y las suites del
+personaje, los gestos, la red, el laboratorio, la minitorre, el cielo, el
+instanciado y el despliegue también.
+
+## Archivos tocados
+
+- `index.html` — las tres comprobaciones nuevas, el guardia ampliado, la
+  colocación con reintentos de verdad, la cima, y el informe de la torre
+
+---
+
+# Cambios — 22 de septiembre de 2026 (decimonoveno lote): los amigos se ven los gestos
+
+Para que un gesto lo vea otro hacían falta dos cosas que no había: que el
+estado de animación viajara por la red, y que el avatar del amigo dejara de
+ser un cilindro. Están las dos. **El robot sale ahora en la partida normal**,
+no sólo en el laboratorio.
+
+## El protocolo: un entero, y ni un mensaje más
+
+Todo el estado de animación viaja en **un solo número** colgado del paquete
+de posición que ya se mandaba:
+
+```
+  bits  0-3   velocidad, en 16 escalones de 0 a correr
+  bits  4-5   aire: 0 suelo · 1 salto · 2 doble salto · 3 cayendo
+  bits  6-9   gesto: 0 ninguno, 1-9
+  bits 10-13  contador de gesto
+```
+
+**Nueve bytes de JSON por jugador y por paquete.** Medido exacto:
+
+| sala | antes | ahora | a 15 Hz |
+|---|---|---|---|
+| 2 jugadores | 229 B | 247 B | 3,4 → 3,6 KB/s |
+| 4 | 439 B | 475 B | 6,4 → 7,0 KB/s |
+| 16 | 1.699 B | 1.843 B | 24,9 → 27,0 KB/s |
+
+Un 8 % más. A cambio, el otro extremo **no tiene que adivinar nada**.
+
+### Por qué no un mensaje nuevo, y por qué nada de marcas de tiempo
+
+El servidor tiene una optimización que no se podía romper: compara el
+mensaje repartido con el anterior byte a byte y, si es igual, baja de 15
+repartos por segundo a uno. Eso ahorró ~59 GB al mes en una sala de cuatro
+con las pestañas olvidadas.
+
+Cualquier campo que cambie cada fotograma —una marca de tiempo, el segundo
+exacto de la animación— la mata entera, y nadie se enteraría hasta la
+factura. Este entero **no cambia estando quieto**: velocidad 0, sin aire, sin
+gesto. Ni estando sentado sin moverse. Medido con dos navegadores de verdad:
+parados, **6 mensajes en 4 segundos**; moviéndose, **62**.
+
+El contador de gesto es lo que permite repetir el MISMO gesto dos veces
+seguidas. Sin él, darle otra vez a la tecla 1 no se notaría al otro lado
+porque el paquete diría exactamente lo mismo. Y sólo cambia al empezar un
+gesto, unas pocas veces por minuto.
+
+### Un detalle que descubrí rompiéndolo
+
+Intenté matar la deduplicación metiendo `Date.now()` en el paquete del
+cliente… y no pasó nada. El servidor **sólo reparte los campos que él
+elige** (`id, name, color, x, y, z, ry, best, a`): lo que mande el cliente de
+más ni se guarda ni se reenvía. Esa lista blanca es lo que protege la
+optimización de futuros despistes. Para matarla de verdad hay que tocar el
+servidor — y entonces la prueba salta: 62 mensajes en vez de 6.
+
+## El rendimiento: pagar por lo que se ve
+
+Un robot son **19 llamadas de dibujo** (son 19 mallas sueltas) más 43 huesos
+que recalcular. Dieciséis serían +304, cuando la torre entera, ya
+instanciada, se dibuja en 33.
+
+Pero **un gesto a 60 m no se distingue de un tropiezo**, y en una torre de
+1.800 m lo normal es tener cero o un amigo a menos de 55. Así que cerca se
+dibuja el robot y lejos el cilindro de tres mallas, con su mezclador sin
+tocar. Con histéresis (entra a 55 m, sale a 64) para que uno justo en el
+límite no encienda y apague el robot doce veces por segundo.
+
+Medido en una torre DIFÍCIL de 2.373 piezas:
+
+| amigos | llamadas | triángulos | animar+mezclar |
+|---|---|---|---|
+| 0 | 33 | 35.527 | — |
+| 1 | 53 | 38.766 | 0,028 ms |
+| 4 | 113 | 48.483 | 0,055 ms |
+| 16 **cerca** | 352 | 87.349 | 0,21 ms |
+| 16 **a 120 m** | **53** | 37.057 | **0,003 ms** |
+
+La última fila es la que importa: **el coste dejó de depender de cuánta gente
+hay en la sala y pasa a depender de cuánta ves**. Y el caso malo (352) exige
+dieciséis amigos a menos de 55 m a la vez, que en esta torre no pasa.
+
+La CPU no preocupa en ningún caso: 0,21 ms sobre un presupuesto de 16.
+
+**Lo que queda por hacer si algún día hiciera falta:** fusionar las 19 mallas
+del robot por material bajaría a ~3 llamadas por personaje (sólo tiene tres
+materiales). Es trabajo de Blender o un horneado al cargar, y con los números
+de arriba no hace falta todavía.
+
+## Clonar un personaje con esqueleto
+
+`Object3D.clone()` **no vale**. Sí duplica los huesos —son Object3D como
+cualquier otro—, pero las mallas CON PIEL del clon se quedan apuntando al
+esqueleto del original. En este robot son 4 de 19 mallas (las manos): el resto
+son piezas rígidas colgadas de un hueso y se mueven bien igualmente.
+
+O sea que el fallo sería **sutil**: a un amigo le bailarían las manos con las
+tuyas y todo lo demás iría perfecto. Hace falta `SkeletonUtils.clone()`, que
+se carga del mismo CDN que el `GLTFLoader`. Si esa línea faltara, los amigos
+se quedan de cilindros y el juego sigue en pie.
+
+Los materiales también se comparten al clonar, así que cada personaje
+individualiza los suyos: 7 objetos, y sin eso teñir a uno los tiñe a los ocho.
+
+## Lo que se ve
+
+Cada amigo con su color (el que le toca por su nombre), su etiqueta, y
+corriendo, andando, saltando, con doble salto, cayendo o haciendo cualquiera
+de los nueve gestos. Tu personaje y el suyo pasan por **la misma función**: no
+es elegancia, es que cualquier fallo lo ves en tu propia pantalla en vez de
+que lo sufra el otro sin que te enteres.
+
+## El interruptor — queda en TRUE
+
+```js
+const ROBOT_EN_JUEGO = true;
+```
+
+**El robot sale en la partida normal**, para ti y para tus amigos, y los
+nueve gestos se ven entre vosotros. (Estuvo un rato en `false` mientras se
+decidía; volver a apagarlo es esa misma línea.)
+
+Lo que trae encendido, y conviene tenerlo presente: el robot mide **1,18 m de ancho** y la caja de
+colisión **0,70**, así que en las cornisas estrechas se le ven los hombros
+volando por fuera del borde. Es el mismo problema que el bidón, y aquí no
+tiene arreglo por colisionadores: es el modelo, que es rechoncho. Un personaje
+humano y estrecho —el pack de Quaternius, por ejemplo— lo quitaría casi
+entero.
+
+**El protocolo no depende del interruptor.** El entero de animación se sigue
+mandando y el servidor lo sigue repartiendo, estén los robots encendidos o no.
+Son ~9 bytes por jugador y paquete que ahora mismo no lee nadie, y a cambio
+volver a encenderlo es exactamente esa línea y nada más: no hay que volver a
+tocar el servidor, ni el paquete, ni depurar nada.
+
+Las pruebas **leen el interruptor en vez de suponerlo**, así que valen en las
+dos posiciones y de paso comprueban que hace lo que dice. Comprobado en las
+dos: con `true` salen robots y los gestos cruzan; con `false` salen cilindros,
+el entero sigue llegando al otro lado (`a=63` → 6,40 m/s) y la deduplicación
+del servidor sigue viva (7 mensajes en 4 s con los dos parados).
+
+Esa comprobación ya cambió de signo tres veces. Escrita así no vuelve a
+cambiar: da igual dónde esté el interruptor.
+
+### Una prueba inestable, cazada al encenderlo
+
+Al volver a poner el interruptor en `true`, la comprobación «B lo ve saludar»
+falló con el peso en **0,57** en vez de pasar de 0,8 — y en la pasada
+anterior había ido bien. Nada estaba roto: esperaba **500 ms de reloj**, y
+estos Chrome sin tarjeta gráfica van a ~5 fotogramas por segundo con dos
+partidas abiertas, así que a veces B sólo alcanzaba a mezclar UN fotograma.
+1 − e^(−0,1/0,12) = 0,565, que es clavado lo que salió.
+
+Se espera al hecho y no al reloj: a que el peso suba al otro lado, y a que el
+contador de gesto cambie. Tres pasadas seguidas en verde.
+
+Es la misma lección que ya está escrita dos veces en este archivo, y me
+volvió a pasar. Cada vez que una prueba dice «espera medio segundo», está
+midiendo la máquina en la que corre.
+
+## Cómo se ha comprobado
+
+`test/red-gestos.js`: **28 comprobaciones con dos Chrome de verdad** en la
+misma sala y el servidor real en medio. Nada de simular el otro extremo: el
+otro extremo es otro navegador.
+
+Se comprueba que el gesto cruza, que repetir el mismo se nota, que corriendo,
+andando, saltando, con doble salto y cayendo se ven bien al otro lado, que
+cerca sale robot y lejos cilindro, que el mezclador del que está lejos no
+avanza, que la deduplicación del servidor sigue viva, y que el entero
+sobrevive al viaje de ida y vuelta.
+
+Rompiendo el código a propósito:
+
+| lo que se rompió | fallos |
+|---|---|
+| no mandar el entero | 7 |
+| que el servidor no lo reparta | 7 |
+| quitar el contador de gesto | 1 |
+| quitar el nivel de detalle | 2 |
+| meter un valor cambiante en el reparto del servidor | 1 |
+| usar `clone()` en vez de `SkeletonUtils.clone()` | 1 |
+
+Esa última no fallaba al principio, y ahí está la lección del lote.
+
+### Cuatro veces que medí mi banco en vez del juego
+
+**Poner `G.vx` a mano no mueve a nadie.** El bucle de física corre cada
+fotograma y, sin ninguna tecla pulsada, frena al jugador a cero antes de que
+salga el siguiente paquete. El otro extremo recibía "quieto" y la prueba
+culpaba a la red.
+
+**Correr contra un muro no es estar quieto.** Con las teclas de verdad, A se
+clavaba contra la columna central: el motor corrige la posición pero **no
+anula la velocidad**, así que su paquete decía "corriendo" mientras no se
+movía, el mensaje salía idéntico y el servidor deduplicaba con toda la razón.
+La prueba volvía a acusar a la red de un choque. (De paso: en el juego, un
+amigo empujando contra una pared se verá corriendo en el sitio.)
+
+**Estos Chrome van a 5 fotogramas por segundo.** Sin tarjeta gráfica y con dos
+partidas abiertas, el cliente manda a 5 Hz y el servidor no tiene nada nuevo
+que repartir las otras diez veces. Estaba midiendo el renderizador por
+software, no el reparto. Ahora se manda con un temporizador propio a 30 Hz.
+
+**Y la peor: una comprobación que no comprobaba nada.** La de los esqueletos
+miraba banderas (`estado`, `gesto`) y posiciones de huesos. Con `clone()` a
+secas las banderas siguen perfectas y los huesos también se duplican, así que
+pasaba. Sólo salta mirando la estructura: todo hueso del esqueleto de una
+malla del clon tiene que ser un hueso **del clon**. Con `clone()`: 172 de 172
+huesos prestados. Con `SkeletonUtils`: 0.
+
+## Archivos tocados
+
+- `index.html` — el protocolo, la fábrica de personajes, los robots remotos
+  con nivel de detalle, el robot en la partida normal
+- `server.js` — reparte un campo más, `a`
+
+`SkeletonUtils.js` se carga del CDN, igual que el `GLTFLoader`: no entra en el
+repositorio y el `Dockerfile` no cambia.
+
+---
+
 # Cambios — 22 de septiembre de 2026 (decimoctavo lote): color de jugador y nueve gestos
 
 El robot del laboratorio lleva ahora **el color que le toca a cada jugador**, y

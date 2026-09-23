@@ -307,6 +307,7 @@
     <span id="hMode" class="run">CORRIENDO</span><span class="sep"></span>
     <span id="hTime">00:00</span><span class="sep"></span>
     <span id="hPerf" title="Fotogramas por segundo · ida y vuelta al servidor">60 fps</span><span class="sep"></span>
+    <span id="hRaton" title="Movimientos de ratón absurdos descartados. Si esto sube, tu ratón o el navegador están soltando saltos y el juego los está parando." hidden></span>
     <span>ESC · PAUSA</span>
   </div>
 </div>
@@ -397,6 +398,12 @@
 <!-- Cargador de glTF, solo lo usa el laboratorio oculto. Si no llega, el
      juego funciona igual: el laboratorio avisa y monta las cajas sin modelo. -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<!-- Clonar un personaje con esqueleto NO se puede con Object3D.clone(): las
+     copias se quedan apuntando a los huesos del original y las dieciséis se
+     mueven exactamente igual, pegadas al primero. SkeletonUtils.clone() es
+     lo que rehace el esqueleto. Si esta línea falta, los amigos se quedan
+     de cilindros y el juego sigue funcionando. -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/SkeletonUtils.js"></script>
 <script>
 "use strict";
 (function(){
@@ -468,6 +475,184 @@ const JumpMath = {
 const CAPS = JumpMath.compute();
 
 /* ═══════════════════════════════════════════════════════════════
+   2b · ESPACIO LIBRE — la verificación que faltaba
+   ───────────────────────────────────────────────────────────────
+   Hasta ahora el generador demostraba que una torre era subible con dos
+   números: el hueco horizontal y la subida. Los dos son PLANOS. Ninguno
+   mira lo que hay ENCIMA de donde aterrizas, ni por dónde pasa el salto.
+
+   La consecuencia, medida: la cima se colocaba justo encima de la última
+   plataforma y dejaba 1,00 m de aire donde hacen falta 1,70 sólo para
+   estar de pie. El motor expulsaba al jugador 70 cm HACIA ABAJO, a través
+   del suelo. De 40 semillas de FÁCIL, la cima era alcanzable en 0. Es
+   decir: nadie había terminado una torre nunca. Y a media torre aparecía
+   una plataforma techada cada ~560 apoyos, que es la que te obliga a
+   cambiar de semilla.
+
+   Aquí están las tres comprobaciones que faltaban.
+   ═══════════════════════════════════════════════════════════════ */
+const AIRE_PISAR = 1.80;      // 1,70 de cuerpo + 10 cm para no ir raspando
+const VENTANA_SOL = 600;      // cuántos sólidos recientes se miran (coste)
+
+/* ¿Choca la caja del jugador, de pie en (x, yPies, z), con este sólido?
+   Misma convención que resolverCaja: giro sólo en yaw. */
+function chocaCaja(b, x, yPies, z, alto){
+  const cy = yPies + alto/2, hy = alto/2;
+  if (Math.abs(cy - b.y) >= b.hh + hy) return false;
+  const dxw = x - b.x, dzw = z - b.z;
+  const c = Math.cos(b.yaw||0), s = Math.sin(b.yaw||0);
+  const lx = dxw*c - dzw*s, lz = dxw*s + dzw*c;
+  return Math.abs(lx) < b.hw + HX && Math.abs(lz) < b.hd + HZ;
+}
+
+/* Aire libre sobre un punto: cuánto hay hasta la primera cara de abajo que
+   se le cruce a la caja del jugador. */
+function aireSobre(lista, desde, x, y, z, tope){
+  let techo = tope;
+  for (let i = desde; i < lista.length; i++){
+    const b = lista[i];
+    const dxw = x-b.x, dzw = z-b.z;
+    const c = Math.cos(b.yaw||0), s = Math.sin(b.yaw||0);
+    const lx = dxw*c - dzw*s, lz = dxw*s + dzw*c;
+    if (Math.abs(lx) >= b.hw+HX || Math.abs(lz) >= b.hd+HZ) continue;
+    const abajo = b.y - b.hh;
+    if (abajo > y + 0.02 && abajo - y < techo) techo = abajo - y;
+  }
+  return techo;
+}
+
+/* ¿Está el apoyo DENTRO de un sólido?
+   Esto se me escapó en el lote 20 y lo encontró un bidón tumbado. aireSobre
+   busca la primera cara de ABAJO que quede por encima de los pies; si una
+   losa gruesa CONTIENE el apoyo —cara de abajo por debajo de los pies y cara
+   de arriba por encima— no tiene ninguna cara que ofrecer y el punto pasa
+   como despejado. Caso real, media semilla 20261005: el escalón se anotó en
+   la tapa de un bidón, a 411,72, y el bidón estaba enterrado en una losa de
+   7,5 × 8,2 m que iba de 410,45 a 413,03. El motor dejaba al jugador 1,31 m
+   más arriba, encima de la losa: el salto ya calculado dejaba de valer y el
+   objeto ni siquiera se veía.
+   Techar y sepultar son cosas distintas y hacen falta las dos.
+
+   LA CONDICIÓN TIENE QUE SER ESTRECHA, y mi primer intento no lo era:
+   pedía que la caja entera del jugador estuviera libre y rechazaba el 3% de
+   los apoyos, con los rescates disparados de 13 a 104 y los arcos cortados
+   de 0 a 11 en DIFÍCIL. Al instrumentarlo, los 512 rechazos de 6 torres eran
+   TODOS postes y cantos de la propia plataforma: piezas de 0,26 × 0,88 m con
+   la base justo a la altura de los pies. Contra uno de ésos no te entierras,
+   te apartas 10 cm.
+   Lo que de verdad no se puede es estar dentro de la materia: la cara de
+   abajo por DEBAJO de los pies y la de arriba por ENCIMA. Eso, y sólo eso.
+   Con esa condición rechaza 11 veces en 75 torres (23.765 llamadas): poco,
+   pero no cero, así que se queda. Cubre el caso contrario al de haTechado:
+   aquí la materia ya estaba y el apoyo se mete dentro; allí el apoyo estaba
+   y la materia llega después. */
+function sepultado(lista, desde, x, y, z){
+  for (let i = desde; i < lista.length; i++){
+    const b = lista[i];
+    if (b.y - b.hh >= y - 0.05) continue;   // se apoya encima: no entierra
+    if (b.y + b.hh <= y + 0.05) continue;   // se queda debajo: es el suelo
+    const dxw = x - b.x, dzw = z - b.z;
+    const c = Math.cos(b.yaw||0), s = Math.sin(b.yaw||0);
+    const lx = dxw*c - dzw*s, lz = dxw*s + dzw*c;
+    if (Math.abs(lx) < b.hw + HX && Math.abs(lz) < b.hd + HZ)return true;
+  }
+  return false;
+}
+
+/* Altura del salto en el instante t. Tres formas de cruzar un hueco:
+   dejarse caer, un salto, o los dos saltos. El segundo salto se modela en
+   el vértice del primero, que es la trayectoria más PLANA que gana esa
+   altura — la que menos se da en la cabeza. */
+function alturaArco(t, modo){
+  const c = CAPS, tA = c.tUp, h1 = c.singleRise;
+  if (modo === 0) return -c.gDown*t*t/2;
+  if (t <= tA) return c.v0*t - c.gUp*t*t/2;
+  if (modo === 1) return h1 - c.gDown*(t-tA)*(t-tA)/2;
+  const t2 = t - tA;
+  return t2 <= tA ? h1 + c.v0*t2 - c.gUp*t2*t2/2
+                  : 2*h1 - c.gDown*(t2-tA)*(t2-tA)/2;
+}
+
+/* ¿Se puede ir de A a B sin darse en la cabeza por el camino?
+   Se prueban las tres trayectorias y basta con que UNA esté libre: el
+   jugador elige, así que rechazar un salto porque una de las tres choca
+   sería rechazar saltos perfectamente posibles.
+   No se miran los extremos: en el origen estás sobre A y al final sobre B,
+   y ahí tocar el suelo es lo normal. El aterrizaje se comprueba aparte,
+   con el aire libre sobre B. */
+function arcoLibre(lista, desde, ax, ay, az, bx, by, bz){
+  const d = Math.hypot(bx-ax, bz-az);
+  if (d < 0.35) return true;                   // prácticamente el mismo sitio
+  const T = d / CAPS.runSpeed;
+  const dy = by - ay;
+  const modos = dy < -0.15 ? [0,1,2] : [1,2];
+  for (const modo of modos){
+    let libre = true;
+    for (let i = 1; i <= 13 && libre; i++){
+      const f = i/14, t = T*f;
+      const h = alturaArco(t, modo);
+      if (h < dy - 0.6) break;                 // esta trayectoria ya no llega
+      const x = ax + (bx-ax)*f, z = az + (bz-az)*f;
+      for (let k = desde; k < lista.length; k++)
+        if (chocaCaja(lista[k], x, ay + h, z, 2*HY)){ libre = false; break; }
+    }
+    if (libre) return true;
+  }
+  return false;
+}
+
+/* Cada prop con sus colisionadores en el sistema del propio modelo: centro
+   de la caja envolvente en x=0,z=0 y base en y=0.
+   Los números de la silla NO son a ojo. Salen de lanzar rayos hacia abajo
+   sobre una rejilla de 1 cm y quedarse con la superficie de arriba, que es
+   donde un jugador se puede parar (la herramienta está en el banco de
+   pruebas, fuera del repo). El asiento salió plano al milímetro: del
+   percentil 10 al 90 hay 0,0 cm de desnivel. */
+const PROPS = {
+  /* BIDÓN. De pie, una caja cuadrada sobresale 11,7 cm en las esquinas y
+     te deja de pie sobre aire visible. Como los colisionadores se UNEN y
+     no se intersecan, la única forma de no sobresalir es que cada caja
+     quepa DENTRO del círculo (a²+b² ≤ R²). Tres cajas giradas 60° entre
+     sí, optimizadas para maximizar el radio mínimo de la unión, cubren el
+     89% del radio: el error pasa de +11,7 cm de aire a −3,0 cm de
+     hundimiento, que no se ve. Con 4 cajas serían −1,9 y con 6, −0,9.
+     Tumbado, la losa sobre la cresta (3,0 cm en el peor punto). */
+  bidon: { ruta:"modelos/barril/Barrel_01_1k.gltf",
+           dePie:   [ {c:[0,0.440,0], t:[0.252,0.880,0.504], yaw:0},
+                      {c:[0,0.440,0], t:[0.252,0.880,0.504], yaw:Math.PI/3},
+                      {c:[0,0.440,0], t:[0.252,0.880,0.504], yaw:2*Math.PI/3} ],
+           tumbado: [ {c:[0,0.513,0], t:[0.240,0.100,0.880], yaw:0} ] },
+
+  /* SILLA. Plana a trozos, que es donde el colisionador compuesto gana.
+     Asiento y respaldo salen del mapa de alturas por rayos; las patas no
+     salen ahí (están debajo del asiento) y se localizaron agrupando los
+     vértices de la geometría por debajo de 0,50 m. Se abren hacia abajo,
+     así que la sección de 0,07 cubre el ensanchado. */
+  silla: { ruta:"modelos/silla/painted_wooden_chair_02_1k.gltf",
+           asiento: { c:[0, 0.535,  0.060], t:[0.570, 0.100, 0.532] },
+           respaldo:{ c:[0, 0.924, -0.261], t:[0.629, 0.679, 0.131] },
+           patas: [ {c:[-0.231, 0.2425,  0.272], t:[0.07, 0.485, 0.07]},
+                    {c:[ 0.226, 0.2425,  0.272], t:[0.07, 0.485, 0.07]},
+                    {c:[-0.263, 0.2425, -0.212], t:[0.07, 0.485, 0.07]},
+                    {c:[ 0.263, 0.2425, -0.212], t:[0.07, 0.485, 0.07]} ] }
+};
+
+/* Medidas del modelo, en metros, para que el GENERADOR pueda colocar sin
+   esperar a que se descargue nada. Salen de medir los .gltf y hay una
+   prueba que las compara con el modelo real: si alguien cambia el archivo
+   y estas cifras se quedan viejas, el colisionador deja de coincidir con
+   lo que se ve y eso no se nota jugando hasta que te caes por un bidón que
+   parecía estar ahí. */
+const PROP_DIM = {
+  bidon: { ancho:0.563, alto:0.880, fondo:0.563 },
+  silla: { ancho:0.639, alto:1.264, fondo:0.662 },
+};
+/* A qué altura queda la cara pisable de cada objeto, contando desde su
+   base. Son las que se eligieron en el laboratorio, no cotas del modelo:
+   el asiento de la silla está a 0,585 aunque el respaldo suba a 1,26. */
+const PROP_PISA = { bidonPie:0.880, bidonTumbado:0.563, silla:0.585 };
+
+/* ═══════════════════════════════════════════════════════════════
    3 · Generador — mismas reglas que TorreGenerator.cs
    ═══════════════════════════════════════════════════════════════ */
 function mulberry32(a){
@@ -528,7 +713,13 @@ const DIFS = {
       probabilidadPiezaGrande: 0.05,
       // aquí está la diferencia de verdad: el blanco es mucho más chico
       anchoMax: 2.4, anchoMin: 0.45,
-      probCornisa: 0.15, probSendero: 0.11
+      probCornisa: 0.15, probSendero: 0.11,
+      /* Ojo: esto NO cuenta todos los pasos. Las cornisas y los senderos se
+         van por `continue` antes de llegar a la colocación normal, así que
+         el contador no baja en ellos. Con 25 salían 12 objetos por torre;
+         el número está ajustado al RESULTADO —unos 20— que es lo que se ve.
+         La prueba comprueba el resultado, no este número. */
+      pasosEntreProps: 15
     }
   }
   ,
@@ -546,6 +737,7 @@ const DIFS = {
       probabilidadPiezaGrande: 0.02,
       anchoMax: 1.6, anchoMin: 0.38,
       probCornisa: 0.15, probSendero: 0.12, probTrampolin: 0.13,
+      pasosEntreProps: 9,        // ver la nota de MEDIA: ajustado al resultado
       // steppers: la cornisa de media pero mucho más alta
       cornisaNiveles: [4, 6],
       // senderos aún más finos
@@ -865,6 +1057,41 @@ function buildTower(seedStr, alturaObjetivo, difId){
     addBox(cx,cy,cz,sx+0.14,0.08,sz+0.14,yaw,"peligro",false);
   };
 
+  /* ── OBJETOS REALES ────────────────────────────────────────────────
+     Un bidón o una silla, con la BASE en (x,y,z) y girados. El visual se
+     marca shape:"prop" y lo dibuja buildMeshes con el modelo cargado; los
+     colisionadores son los que se eligieron en el laboratorio midiendo,
+     no la caja envolvente:
+       · bidón de pie  → 3 cajas inscritas giradas 60° entre sí, para que
+         no te quedes de pie sobre aire en las esquinas
+       · bidón tumbado → la losa sobre la cresta
+       · silla         → asiento + respaldo + una caja por pata
+     La conversión de coordenadas locales a mundo es la misma fórmula que
+     usa el lab, y vive en un solo sitio para que no se cuelen los signos. */
+  const colisProp = (tipo, tumbado) =>
+    tipo === "bidon" ? (tumbado ? PROPS.bidon.tumbado : PROPS.bidon.dePie)
+                     : [PROPS.silla.asiento, PROPS.silla.respaldo, ...PROPS.silla.patas];
+
+  const ponerProp = (tipo, x, yBase, z, giro, tumbado) => {
+    visuals.push({ cx:x, cy:yBase, cz:z, sx:1, sy:1, sz:1, yaw:giro,
+                   shape:"prop", prop:tipo, tumbado:!!tumbado, mat:tipo });
+    const c0 = Math.cos(giro), s0 = Math.sin(giro);
+    for (const b of colisProp(tipo, tumbado)){
+      const dx =  b.c[0]*c0 + b.c[2]*s0;
+      const dz = -b.c[0]*s0 + b.c[2]*c0;
+      solids.push(box(x+dx, yBase+b.c[1], z+dz,
+                      b.t[0]/2, b.t[1]/2, b.t[2]/2, giro + (b.yaw||0)));
+    }
+  };
+  /* Sortea qué objeto toca. La silla tumbada no existe: no tendría dónde
+     pisarse. El bidón sí, y cambia bastante cómo se salta encima. */
+  const sorteaProp = () => {
+    const r = rnd();
+    if (r < 0.42) return { tipo:"bidon", tumbado:false, pisa:PROP_PISA.bidonPie };
+    if (r < 0.70) return { tipo:"bidon", tumbado:true,  pisa:PROP_PISA.bidonTumbado };
+    return { tipo:"silla", tumbado:false, pisa:PROP_PISA.silla };
+  };
+
   // ── Explanada ──
   addBox(0,-1.25,0, 26,2.5,26, 0,"hormigon",true);
   const pr=1.2, pg=0.6, pm=26/2-pg/2;
@@ -879,23 +1106,139 @@ function buildTower(seedStr, alturaObjetivo, difId){
   let grupoEsp=0;
   const zonasCornisa=[];   // campana de aire que hay que dejar libre
 
-  /* Ejecuta una colocación y la DESHACE si ha techado alguna cornisa.
+  /* APOYOS RECIENTES cuyo aire hay que respetar. Antes sólo se protegían
+     las cornisas; ahora, cualquier sitio donde el jugador tenga que estar
+     de pie. Se guardan los últimos 48: un sólido no baja más de ~3,5 m por
+     debajo de su propio apoyo, así que no puede techar nada más antiguo. */
+  const reservas = [], reservasProp = [];
+  /* Se guarda también DE DÓNDE se venía. Hace falta para juzgar un
+     enterramiento: si una pieza nueva levanta este apoyo, la pregunta no es
+     "¿lo ha tocado?" sino "¿se sigue llegando desde el apoyo anterior?". */
+  const reservar = (x, y, z, esProp) => {
+    const r = { x, y, z, prop: !!esProp };
+    reservas.push(r);
+    if (reservas.length > 48) reservas.shift();
+    /* Los escalones-objeto NO caducan a los 48 apoyos. Se probó con el
+       plazo normal y no sirvió: la losa que enterraba el bidón de media
+       20261005 se coloca mucho más tarde, cuando la reserva ya había
+       salido de la lista, y el fallo seguía ahí (sólo cambió de 1,31 m a
+       0,90 m, que era otra losa distinta).
+       Conservarlos toda la torre es barato: son unos 21, frente a los
+       ~900 apoyos de una torre de MEDIA. */
+    if (r.prop) reservasProp.push(r);
+  };
+  /* ¿Las piezas nuevas (de nS en adelante) han estropeado algo anterior?
+     Dos formas de estropear, y hasta ahora no se miraba ninguna de las dos
+     para las piezas normales:
+       · TECHAR un apoyo: dejarlo sin sitio para ponerse de pie.
+       · CORTAR un salto: meterse en medio de un arco que ya se había dado
+         por bueno. Una losa colocada después puede partir por la mitad un
+         salto de hace tres pasos, y eso no se veía. */
+  const haTechado = (nS) => {
+    for (let k = nS; k < solids.length; k++){
+      const b = solids[k];
+      /* Dos listas, recorridas sin juntarlas: concatenarlas creaba un array
+         nuevo por cada sólido nuevo, y esto se ejecuta cientos de miles de
+         veces por torre. */
+      for (let q = 0, lista = reservas; q < 2; q++, lista = reservasProp)
+      for (const r of lista){
+        const abajo = b.y - b.hh, arriba = b.y + b.hh;
+        /* TECHAR: la cara de abajo cae justo sobre la cabeza.
+           SEPULTAR: no hay cara que valga porque el apoyo queda DENTRO de la
+           pieza. Ésta se me escapó hasta que un bidón tumbado acabó metido en
+           una losa de 7,5 × 8,2 m (media 20261005, apoyo a 411,72, losa de
+           410,45 a 413,03): el jugador aparecía 1,31 m más arriba, encima de
+           la losa, el salto calculado dejaba de valer y el objeto ni se veía.
+           Y no se puede comprobar al colocar el apoyo, porque cuando el bidón
+           se puso allí no había nada: la losa llega DESPUÉS. Su sitio es
+           justo aquí, donde se juzga a la pieza nueva. */
+        const techa  = abajo >  r.y + 0.02 && abajo - r.y < AIRE_PISAR;
+        /* El enterramiento sólo se vigila en los ESCALONES-OBJETO, y la
+           razón es de coste medido, no de pereza: aplicarlo a todos los
+           apoyos multiplicaba por 20 los arcos cortados (de 1 a 30 en 25
+           torres de MEDIA) y por 15 los rescates, porque rechazar un
+           monumento entero por rozar un apoyo viejo obliga a recolocar y lo
+           que viene detrás suele ser peor. En un bidón el rechazo es barato:
+           la pieza es pequeña y siempre hay otro sitio.
+           Que quede dicho con todas las letras: los apoyos NORMALES siguen
+           pudiendo quedar dentro de una losa puesta después. Medido sin esta
+           guardia son 79 de 15.014 apoyos en 16 torres —unos 5 por torre—,
+           y el motor deja al jugador una mediana de 1,25 m más arriba. Casi
+           todos se suben y se sigue; no está arreglado y no se finge que lo
+           esté. Va anotado como pendiente en CAMBIOS.md. */
+        const invade = r.prop && abajo < r.y - 0.05 && arriba > r.y + 0.05;
+        if (!techa && !invade) continue;
+        const dxw = r.x-b.x, dzw = r.z-b.z;
+        const c = Math.cos(b.yaw||0), sn = Math.sin(b.yaw||0);
+        const lx = dxw*c - dzw*sn, lz = dxw*sn + dzw*c;
+        if (Math.abs(lx) >= b.hw+HX || Math.abs(lz) >= b.hd+HZ) continue;
+        if (techa){ rech.techa++; return true; }
+        /* Atravesar un apoyo no siempre lo estropea, y rechazar todas las
+           intersecciones sale carísimo: probé a hacerlo y los rescates
+           pasaron de 7 a 168 y los arcos cortados de 1 a 24, para 227 casos
+           de los que el motor sólo rompía 79.
+           Quien decide es resolverCaja, que empuja por la cara MÁS CERCANA.
+           Si la salida más barata es de lado, el jugador se aparta y se
+           queda a su altura: no pasa nada. Si es hacia arriba, aparece
+           encima de la pieza —mediana medida: 1,25 m más alto— y el salto
+           que el generador había dado por bueno deja de valer. Sólo ese caso
+           es el que hay que rechazar, y es el mismo criterio que usa el
+           motor, no uno inventado aquí. */
+        const arribaEmpuje = arriba - r.y;
+        const abajoEmpuje  = (r.y + 2*HY) - abajo;
+        const xEmpuje = (b.hw + HX) - Math.abs(lx);
+        const zEmpuje = (b.hd + HZ) - Math.abs(lz);
+        if (!(arribaEmpuje < abajoEmpuje && arribaEmpuje < xEmpuje
+              && arribaEmpuje < zEmpuje)) continue;
+        /* Llegué a dejar pasar la subida si desde el apoyo anterior aún se
+           alcanzaba la altura nueva. Era un error, y encima invisible: esa
+           escapatoria sólo podía aplicarse a los escalones-objeto, que es
+           justo donde no vale. Un bidón que acaba dentro de una plataforma
+           deja de verse, y el jugador se planta 0,90 m por encima de donde
+           el generador dijo. Que la torre siga siendo subible no lo
+           arregla. */
+        rech.dentro++; return true;
+      }
+      for (const zc of zonasCornisa) if (invadeCampana(b, zc)) { rech.campana++; return true; }
+    }
+    /* Los saltos recientes, contra SÓLO las piezas nuevas: barato. */
+    const n0 = Math.max(1, apoyos.length - 10);
+    for (let i = n0; i < apoyos.length; i++){
+      const a = apoyos[i-1], b2 = apoyos[i];
+      if (a.tipo && a.tipo === b2.tipo && a.g === b2.g) continue;
+      if (!arcoLibre(solids, nS, a.x, a.y, a.z, b2.x, b2.y, b2.z)) { rech.corta++; return true; }
+    }
+    return false;
+  };
+
+  /* Ejecuta una colocación y la DESHACE si ha techado a alguien.
      Devuelve el resultado, o null si no hubo manera (y entonces el bucle
      sigue con una pieza normal). */
   const sinTechar = (fn) => {
     const nS = solids.length, nV = visuals.length, nA = apoyos.length;
     const r = fn();
-    for (let k = nS; k < solids.length; k++)
-      for (const zc of zonasCornisa)
-        if (invadeCampana(solids[k], zc)){
-          solids.length = nS; visuals.length = nV; apoyos.length = nA;
-          return null;
-        }
+    if (haTechado(nS)){
+      solids.length = nS; visuals.length = nV; apoyos.length = nA;
+      return null;
+    }
+    for (let i = nA; i < apoyos.length; i++) reservar(apoyos[i].x, apoyos[i].y, apoyos[i].z);
     return r;
   };
   let nCornisas=0, nivelesCornisa=0, peorVoladizo=0;
   let nSenderos=0, tramosSendero=0, senderoMasFino=Infinity;
   let nTrampo=0, rebotes=0, trampoConBidon=0;
+  let rescates=0, forzados=0;
+  /* Cada cuántos pasos toca un objeto real, con variación para que no
+     caiga siempre en el mismo sitio de la subida. Empieza pronto para
+     que se vea uno antes de los primeros 100 m. */
+  const CADA_PROP = GEN.pasosEntreProps || 0;
+  let desdeProp = CADA_PROP ? 4 + Math.floor(rnd()*6) : 1e9;
+  let propsPlataforma=0, propsAdorno=0;
+  /* Cuántas veces rechaza cada guardia. Sin esto no hay forma de saber
+     si una comprobación trabaja o es adorno: quité dos de ellas y ninguna
+     prueba se puso roja — resultó que nunca disparan porque la torre solo
+     sube, y lo que trabaja es el guardia de lo que YA está construido. */
+  const rech = { techa:0, campana:0, corta:0, aire:0, arco:0, dentro:0 };
 
   while (y < alturaObjetivo && guardia++ < 20000){
     paso++;
@@ -1000,30 +1343,162 @@ function buildTower(seedStr, alturaObjetivo, difId){
     }
     ancho = Math.max(0.55, ancho);
 
-    /* Se coloca la pieza y se comprueba que no haya techado ninguna cornisa
-       reciente. No vale mirar solo dónde cae su apoyo: una pasarela mide
-       hasta 14 m y una losa grande 7, así que el centro puede estar lejos y
-       la caja justo encima. Si invade, se deshace y se prueba girando. */
+    /* COLOCACIÓN CON RED. Tres cosas tienen que cumplirse, y las tres se
+       comprueban de verdad:
+         1 · la pieza nueva no techa ningún apoyo reciente
+         2 · sobre el apoyo nuevo cabe el jugador de pie
+         3 · el salto desde el apoyo anterior no se da en la cabeza
+       Antes sólo se miraba (1), sólo contra cornisas, y —lo peor— al
+       tercer intento se colocaba IGUAL aunque chocara. Por ahí se colaban
+       las plataformas imposibles. */
     let colocada = false;
-    for (let intento = 0; intento < 3 && !colocada; intento++){
+    const desdeSol = Math.max(0, solids.length - VENTANA_SOL);
+
+    /* ¿Toca objeto real, y de plataforma o de adorno?
+       Mitad y mitad a propósito: si un bidón siempre fuera plataforma se
+       convertiría en un icono de "aquí se salta" y dejaría de sorprender;
+       si siempre fuera atrezo, no serviría de nada. Nunca sobre un descanso
+       ni un monumento, que están justamente para respirar. */
+    const tocaProp = CADA_PROP && !descanso && !monumento && --desdeProp <= 0;
+    const propEsPiso = tocaProp && rnd() < 0.5;
+    if (tocaProp) desdeProp = Math.max(6, Math.round(CADA_PROP * (0.55 + rnd()*0.9)));
+    const elProp = tocaProp ? sorteaProp() : null;
+
+    for (let intento = 0; intento < 8 && !colocada; intento++){
       const nS = solids.length, nV = visuals.length;
-      apoyos.push({x:cx, y:y, z:cz});
-      placePiece(rnd, addBox, addCyl, canto, monumento, descanso, dif,
-                 cx, y, cz, -rumbo + Math.PI/2, ancho, GEN);
-      let choca = false;
-      for (let k = nS; k < solids.length && !choca; k++)
-        for (const zc of zonasCornisa) if (invadeCampana(solids[k], zc)) { choca = true; break; }
-      if (!choca || intento === 2){ colocada = true; break; }
-      solids.length = nS; visuals.length = nV; apoyos.pop();
-      rumbo += Math.PI*0.5;
-      cx = px0 + Math.cos(rumbo)*hueco; cz = pz0 + Math.sin(rumbo)*hueco;
+      if (propEsPiso){
+        /* El objeto ES el escalón: flotando, con su cara pisable justo a la
+           altura que pedía el generador. Así el salto que ya estaba
+           calculado sigue valiendo tal cual. */
+        ponerProp(elProp.tipo, cx, y - elProp.pisa, cz, rnd()*Math.PI*2, elProp.tumbado);
+      } else {
+        placePiece(rnd, addBox, addCyl, canto, monumento, descanso, dif,
+                   cx, y, cz, -rumbo + Math.PI/2, ancho, GEN);
+      }
+      /* Se apunta CUÁL de las tres rechaza. Sin esto no hay forma de saber
+         si una comprobación está trabajando o es adorno: probé a quitar dos
+         de ellas y ninguna prueba se puso roja. */
+      let vale = true;
+      if (haTechado(nS)) { vale = false; }
+      else if (sepultado(solids, desdeSol, cx, y, cz)) { rech.dentro++; vale = false; }
+      else if (aireSobre(solids, desdeSol, cx, y, cz, 9) < AIRE_PISAR) { rech.aire++; vale = false; }
+      else if (!arcoLibre(solids, desdeSol, px0, y-dy, pz0, cx, y, cz)) { rech.arco++; vale = false; }
+      if (vale){ colocada = true; break; }
+      solids.length = nS; visuals.length = nV;
+      /* Se prueba en otra dirección, y a partir del quinto intento también
+         más cerca y más bajo: si el sitio está mal, insistir con el mismo
+         salto no lo arregla. */
+      rumbo += Math.PI*0.37 + rnd()*0.4;
+      const h2 = intento < 4 ? hueco : Math.max(1.8, hueco*0.6);
+      if (intento >= 4){ y = (y - dy) + Math.max(0.9, dy*0.55); }
+      cx = px0 + Math.cos(rumbo)*h2; cz = pz0 + Math.sin(rumbo)*h2;
+    }
+    /* Red de seguridad: si en ocho intentos no hubo sitio, una losa pequeña
+       en un hueco despejado. Rompe el ritmo, pero una torre que no se puede
+       subir no tiene ritmo que romper. */
+    if (!colocada){
+      let puesta = false;
+      for (let k = 0; k < 16 && !puesta; k++){
+        const ang = rumbo + k*Math.PI/8;
+        const h3 = 2.2 + (k%4)*0.9;
+        const nx = px0 + Math.cos(ang)*h3, nz = pz0 + Math.sin(ang)*h3;
+        const ny = (y - dy) + 1.2;
+        const nS = solids.length, nV = visuals.length;
+        addBox(nx, ny-0.3, nz, 2.4, 0.6, 2.4, 0, "galv", true);
+        canto(2.4, 0, 2.4, nx, ny-0.06, nz, 0);
+        if (!haTechado(nS)
+            && !sepultado(solids, desdeSol, nx, ny, nz)
+            && aireSobre(solids, desdeSol, nx, ny, nz, 9) >= AIRE_PISAR
+            && arcoLibre(solids, desdeSol, px0, y-dy, pz0, nx, ny, nz)){
+          cx = nx; cz = nz; y = ny; puesta = true; rescates++;
+        } else { solids.length = nS; visuals.length = nV; }
+      }
+      if (!puesta){
+        /* Último recurso: recto hacia arriba, lo justo para poder saltar.
+           Que quede anotado en el informe: si esto sale mucho, hay que
+           mirar el generador, no taparlo. */
+        cx = px0; cz = pz0; y = (y - dy) + 2.0;
+        addBox(cx, y-0.3, cz, 2.4, 0.6, 2.4, 0, "galv", true);
+        canto(2.4, 0, 2.4, cx, y-0.06, cz, 0);
+        rescates++; forzados++;
+      }
+    }
+    apoyos.push({x:cx, y:y, z:cz});
+    reservar(cx, y, cz, propEsPiso && colocada);
+    if (propEsPiso && colocada) propsPlataforma++;
+
+    /* ADORNO: encima de la losa que se acaba de poner, apartado del centro
+       para no estorbar el aterrizaje. Si no cabe o techa algo, simplemente
+       no se pone: un adorno nunca puede costar una torre. */
+    if (tocaProp && !propEsPiso && colocada){
+      const sep = Math.max(0.75, Math.min(ancho*0.42, 2.6));
+      for (let k = 0; k < 6; k++){
+        const ang = rnd()*Math.PI*2;
+        const px2 = cx + Math.cos(ang)*sep, pz2 = cz + Math.sin(ang)*sep;
+        const nS = solids.length, nV = visuals.length;
+        ponerProp(elProp.tipo, px2, y, pz2, rnd()*Math.PI*2, elProp.tumbado);
+        const estorba = haTechado(nS)
+          || aireSobre(solids, nS, cx, y, cz, 9) < AIRE_PISAR    // no tapar el propio apoyo
+          || sepultado(solids, desdeSol, px2, y, pz2);           // ni quedar enterrado y no verse
+        if (!estorba){ propsAdorno++; break; }
+        solids.length = nS; visuals.length = nV;
+      }
     }
   }
 
-  // ── Cima ──
-  y += 2.4;
-  addBox(cx, y-0.7, cz, 10,1.4,10, 0, "pintado", true);
-  canto(10,0,10, cx, y-0.06, cz, 0);
+  /* ── Cima ──
+     Aquí estaba el fallo más gordo del generador. Antes:
+
+         y += 2.4;
+         addBox(cx, y-0.7, cz, 10,1.4,10, 0, "pintado", true);
+
+     La losa de la cima, de 10×10 y 1,4 m de grueso, se plantaba JUSTO
+     ENCIMA de la última plataforma, en el mismo (x,z). Eso deja 1,00 m de
+     aire sobre ella —medido, y siempre exactamente 1,00— cuando hacen
+     falta 1,70 sólo para estar de pie. El motor expulsaba al jugador 70 cm
+     hacia abajo, atravesando el suelo, y para subirse a la cima había que
+     salir de una sombra de 5 m en todas direcciones estando aplastado
+     contra el techo. De 40 semillas de FÁCIL, la cima era alcanzable en 0.
+
+     Ahora la cima se coloca como cualquier otro paso: apartada, con una
+     subida y un hueco que pasan las mismas comprobaciones que el resto, y
+     verificando además que el arco del salto pasa por encima del borde de
+     su propia losa en vez de estamparse contra el canto. */
+  const LADO_CIMA = 10, GRUESO_CIMA = 1.4;
+  let cimaOk = false, cimaIntentos = 0;
+  {
+    const px1 = cx, pz1 = cz, py1 = y;
+    const desdeSol = Math.max(0, solids.length - VENTANA_SOL);
+    for (const dy2 of [1.8, 2.0, 1.6, 2.2, 1.4, 2.5]){
+      for (const dd of [8.0, 8.8, 7.4, 9.6, 10.4, 6.8]){
+        if (dd > JumpMath.maxGap(CAPS, dy2, MARGEN)) continue;
+        for (let k = 0; k < 12 && !cimaOk; k++){
+          cimaIntentos++;
+          const ang = rumbo + k*Math.PI/6;
+          const nx = px1 + Math.cos(ang)*dd, nz = pz1 + Math.sin(ang)*dd;
+          const ny = py1 + dy2;
+          const nS = solids.length, nV = visuals.length;
+          addBox(nx, ny-GRUESO_CIMA/2, nz, LADO_CIMA, GRUESO_CIMA, LADO_CIMA, 0, "pintado", true);
+          canto(LADO_CIMA,0,LADO_CIMA, nx, ny-0.06, nz, 0);
+          if (!haTechado(nS)
+              && aireSobre(solids, desdeSol, nx, ny, nz, 9) >= AIRE_PISAR
+              && arcoLibre(solids, desdeSol, px1, py1, pz1, nx, ny, nz)){
+            cx = nx; cz = nz; y = ny; cimaOk = true;
+          } else { solids.length = nS; visuals.length = nV; }
+        }
+        if (cimaOk) break;
+      }
+      if (cimaOk) break;
+    }
+    if (!cimaOk){
+      /* No debería pasar nunca; si pasa, que salga en el informe y no que
+         la torre se quede sin final. Una losa pequeña, apartada y baja. */
+      const ang = rumbo + Math.PI*0.5;
+      cx = px1 + Math.cos(ang)*4.5; cz = pz1 + Math.sin(ang)*4.5; y = py1 + 1.4;
+      addBox(cx, y-0.4, cz, 4.5, 0.8, 4.5, 0, "pintado", true);
+      canto(4.5,0,4.5, cx, y-0.06, cz, 0);
+    }
+  }
   apoyos.push({x:cx,y:y,z:cz});
   const summit = {x:cx,y:y,z:cz};
 
@@ -1040,6 +1515,30 @@ function buildTower(seedStr, alturaObjetivo, difId){
      anda. Esas dos se validan por diseño, con márgenes medidos con el bot
      de física, y se cuentan aparte para que el informe no mienta. */
   let peor=0, imposibles=0, peorD=0, peorDy=0, saltosNormales=0;
+
+  /* Y ahora también en 3D: ¿cabe de pie en cada apoyo, y pasa el salto?
+     Esto no sustituye a las comprobaciones de dentro del bucle —esas
+     RECHAZAN piezas—; esto es el informe honesto de lo que quedó
+     construido al final, incluida la interacción entre piezas lejanas.
+     Se mira contra TODOS los sólidos, sin ventana: aquí ya no hay prisa. */
+  let techados = 0, arcosMalos = 0;
+  for (let i=0;i<apoyos.length;i++){
+    const a = apoyos[i];
+    if (aireSobre(solids, 0, a.x, a.y, a.z, 9) >= AIRE_PISAR) continue;
+    /* El punto exacto puede estar tapado por una COLUMNA de la propia
+       plataforma —un monumento levanta 2 a 4 de 4 a 13 m— y eso no impide
+       jugar: el jugador no tiene que pisar el centro. Sólo cuenta como
+       techado si no hay sitio en toda la plataforma. Contarlo sin esto daba
+       un 100% de torres malas que no era verdad. */
+    let hueco = false;
+    for (let dx = -2.5; dx <= 2.5 && !hueco; dx += 0.5)
+      for (let dz = -2.5; dz <= 2.5 && !hueco; dz += 0.5){
+        if (Math.abs(dx) < 0.5 && Math.abs(dz) < 0.5) continue;
+        if (aireSobre(solids, 0, a.x+dx, a.y, a.z+dz, 9) >= AIRE_PISAR) hueco = true;
+      }
+    if (!hueco) techados++;
+  }
+
   for (let i=1;i<apoyos.length;i++){
     const a=apoyos[i-1], b=apoyos[i];
     /* Solo se salta el tramo INTERNO de una misma pieza especial. Sin el
@@ -1053,12 +1552,15 @@ function buildTower(seedStr, alturaObjetivo, difId){
     const r=dd/mx;
     if (r>peor){ peor=r; peorD=dd; peorDy=ddy; }
     if (r>1) imposibles++;
+    if (!arcoLibre(solids, 0, a.x, a.y, a.z, b.x, b.y, b.z)) arcosMalos++;
   }
 
   return indexarTorre({ solids, visuals, apoyos, summit, start, altura:y,
            dif: difValida(difId),
            informe:{ peor, imposibles, peorD, peorDy, piezas:visuals.length,
-                     saltosNormales,
+                     saltosNormales, rescates, forzados, cimaOk, cimaIntentos, rech,
+                     propsPlataforma, propsAdorno,
+                     techados, arcosMalos,
                      cornisas:nCornisas, nivelesCornisa, peorVoladizo,
                      senderos:nSenderos, tramosSendero,
                      trampolines:nTrampo, rebotes, trampoConBidon,
@@ -1289,6 +1791,29 @@ function initWorld(){
    son los mismos y siguen siendo una miseria; las llamadas pasan de
    miles a un puñado. Además desaparece el coste de actualizar 2.373
    matrices por fotograma, porque ahora hay menos de diez objetos. */
+/* ── MODELOS DE OBJETO, PREPARADOS PARA INSTANCIAR ─────────────────
+   El bidón y la silla son UNA malla con UN material cada uno, así que
+   todos los bidones de una torre caben en una sola llamada de dibujo y
+   todas las sillas en otra. Para eso hace falta que la geometría ya venga
+   centrada y con la base en y=0: una InstancedMesh no admite un grupo
+   contenedor donde recolocar, sólo una matriz por copia.
+   El bidón tumbado es una geometría aparte —la misma, girada 90° y vuelta
+   a apoyar— y no una rotación en la matriz, porque al acostarlo el punto
+   de apoyo deja de estar donde estaba y recolocarlo copia a copia sería
+   repetir la misma cuenta mil veces. */
+const PROPMOD = { bidon:null, bidonT:null, silla:null, cargando:false, listo:false };
+
+function prepararGeoProp(malla, tumbado){
+  const geo = malla.geometry.clone();
+  geo.applyMatrix4(malla.matrixWorld);            // por si el .gltf trae transformadas
+  if (tumbado) geo.rotateX(Math.PI/2);
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  geo.translate(-(bb.min.x+bb.max.x)/2, -bb.min.y, -(bb.min.z+bb.max.z)/2);
+  geo.computeBoundingBox();
+  return geo;
+}
+
 function buildMeshes(tower){
   if (W.group){
     W.group.traverse(o => { if (o.isInstancedMesh) o.dispose(); });
@@ -1302,15 +1827,26 @@ function buildMeshes(tower){
   geos.cylZ = geos.cylV;
 
   // se cuenta cuántas copias lleva cada grupo antes de reservar
+  /* Un objeto sin modelo cargado todavía no se dibuja y punto: la torre se
+     ve entera desde el primer fotograma y los bidones aparecen cuando
+     llegan, sin bloquear nada. Al terminar la descarga se vuelve a llamar
+     aquí. */
+  const clavePropDe = (v) => v.prop === "bidon" ? (v.tumbado ? "bidonT" : "bidon") : "silla";
+  const dibujable = (v) => v.shape !== "prop" || !!PROPMOD[clavePropDe(v)];
+
   const grupos = new Map();
   for (const v of tower.visuals){
-    const clave = v.shape + "|" + (MATS[v.mat] ? v.mat : "hormigon");
+    if (!dibujable(v)) continue;
+    const clave = v.shape === "prop" ? "prop|" + clavePropDe(v)
+                                     : v.shape + "|" + (MATS[v.mat] ? v.mat : "hormigon");
     grupos.set(clave, (grupos.get(clave) || 0) + 1);
   }
   const mallas = new Map(), n = new Map();
   for (const [clave, total] of grupos){
     const [forma, mat] = clave.split("|");
-    const im = new THREE.InstancedMesh(geos[forma] || geos.box, MATS[mat], total);
+    const im = forma === "prop"
+      ? new THREE.InstancedMesh(PROPMOD[mat].geo, PROPMOD[mat].mat, total)
+      : new THREE.InstancedMesh(geos[forma] || geos.box, MATS[mat], total);
     im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     im.frustumCulled = false;      // el grupo abarca toda la torre: cularlo no aporta
     mallas.set(clave, im); n.set(clave, 0);
@@ -1320,9 +1856,12 @@ function buildMeshes(tower){
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(),
         e = new THREE.Euler(), pos = new THREE.Vector3(), esc = new THREE.Vector3();
   for (const v of tower.visuals){
-    const clave = v.shape + "|" + (MATS[v.mat] ? v.mat : "hormigon");
+    if (!dibujable(v)) continue;
+    const clave = v.shape === "prop" ? "prop|" + clavePropDe(v)
+                                     : v.shape + "|" + (MATS[v.mat] ? v.mat : "hormigon");
     const im = mallas.get(clave), i = n.get(clave);
-    if (v.shape === "box")      esc.set(v.sx, v.sy, v.sz);
+    if (v.shape === "prop")     esc.set(1, 1, 1);
+    else if (v.shape === "box") esc.set(v.sx, v.sy, v.sz);
     else                        esc.set(v.sx, v.sy, v.sx);
     // el cilindro tumbado se acuesta girando X 90°, con el yaw aplicado antes
     if (v.shape === "cylZ") e.set(Math.PI/2, v.yaw, 0, "YXZ");
@@ -1449,7 +1988,8 @@ const G = {
   lab:false,              // dentro del laboratorio oculto
   ultimaEntrada:0,        // última vez que tocaste teclado o ratón (ver siesta)
   // cámara amortiguada — desacoplada de la posición física
-  camX:0, camY:0, camZ:0, camDist:6.2
+  camX:0, camY:0, camZ:0, camDist:6.2,
+  saltosRaton:0        // eventos de ratón descartados por absurdos
 };
 
 const G_UP   = CAPS.gUp;
@@ -1775,6 +2315,9 @@ function hud(){
   $("worst").textContent=Math.round(G.worst)+" m";
   $("hTime").textContent=fmt(G.elapsed);
   $("hSpeed").textContent=Math.hypot(G.vx,G.vz).toFixed(1)+" m/s";
+  /* Sólo aparece si ha pasado algo: un contador siempre a cero es ruido. */
+  const hr = $("hRaton");
+  if (G.saltosRaton){ hr.hidden = false; hr.textContent = "CÁMARA " + G.saltosRaton; }
   const andando = G.stick ? G.stick.mag < (STICK_ANDAR + STICK_CORRER)/2
                           : !!(G.keys["ShiftLeft"]||G.keys["ShiftRight"]);
   $("hMode").textContent=andando?"ANDANDO":"CORRIENDO";
@@ -1975,6 +2518,7 @@ const Net = {
           this.jugadores.set(pl.id, {
             id:pl.id, name:String(pl.name||"?").slice(0,14),
             color:typeof pl.color==="string"?pl.color:"#4FD1C5",
+            a:typeof pl.a==="number"?pl.a:0,
             x:+pl.x||0, y:+pl.y||0, z:+pl.z||0, ry:+pl.ry||0, best:+pl.best||0 });
         });
         const vivos = new Set(d.p.map(x=>x && x.id));
@@ -2020,7 +2564,8 @@ const Net = {
   _pos(){
     return { t:"p",
       x:+G.px.toFixed(2), y:+(G.py-HY).toFixed(2), z:+G.pz.toFixed(2),
-      ry:+(W.player ? W.player.rotation.y : 0).toFixed(2), best:Math.round(G.best) };
+      ry:+(W.player ? W.player.rotation.y : 0).toFixed(2), best:Math.round(G.best),
+      a: empaquetarRed() };
   },
 
   tick(now){
@@ -2207,10 +2752,13 @@ function syncRemotos(dt){
     vistos.add(o.id);
     let r=remotos.get(o.id);
     if (!r){
-      const g=avatar(o.color);
-      const l=etiqueta(o.name||"?", o.color); l.position.y=2.2; g.add(l);
+      const g=new THREE.Group();
+      const cil=avatar(o.color);                       // el de siempre, para lejos
+      const l=etiqueta(o.name||"?", o.color); l.position.y=2.2;
+      g.add(cil, l);
       W.scene.add(g); g.position.set(o.x,o.y,o.z);
-      r={g,l,name:o.name,ausente:0}; remotos.set(o.id,r);
+      r={g,l,cil,per:null,name:o.name,color:o.color,ausente:0,cerca:false};
+      remotos.set(o.id,r);
     }
     r.ausente=0;
     if (r.name!==o.name){
@@ -2222,7 +2770,44 @@ function syncRemotos(dt){
     r.g.position.x += (o.x-r.g.position.x)*k;
     r.g.position.y += (o.y-r.g.position.y)*k;
     r.g.position.z += (o.z-r.g.position.z)*k;
-    r.g.rotation.y = o.ry;
+
+    /* NIVEL DE DETALLE. Aquí está casi todo el rendimiento de esta función.
+       Un robot son 19 llamadas de dibujo —son 19 mallas sueltas— más el
+       coste de recalcular 43 huesos cada fotograma. Dieciséis robots serían
+       +304 llamadas, cuando la torre entera, ya instanciada, se dibuja en
+       10-18.
+
+       Pero un gesto a 60 m no se distingue de un tropiezo, y en una torre
+       de 1.800 m lo normal es tener cero o un amigo a menos de 55. Así que
+       cerca se dibuja el robot y lejos el cilindro de tres mallas, con su
+       mezclador sin tocar. El coste deja de depender de cuánta gente hay en
+       la sala y pasa a depender de cuánta ves, que es como debe ser.
+
+       Con histéresis (entra a 55, sale a 64) para que uno que va justo en
+       el límite no encienda y apague el robot doce veces por segundo. */
+    const d = Math.hypot(o.x-G.px, o.y-(G.py-HY), o.z-G.pz);
+    r.cerca = r.cerca ? (d < DIST_ROBOT_SALE) : (d < DIST_ROBOT);
+    const quiereRobot = ROBOT_EN_JUEGO && r.cerca && MODELO.estado === "listo";
+
+    if (quiereRobot && !r.per){
+      const P = nuevoPersonaje(o.color);
+      if (P){ r.per = P; r.g.add(P.raiz); }
+    }
+    if (r.per && r.color !== o.color){ tintar(r.per, o.color); r.color = o.color; }
+
+    if (r.per && quiereRobot){
+      r.per.raiz.visible = true; r.cil.visible = false;
+      animarPersonaje(r.per, dt, desempaquetarRed(o.a));
+      /* El giro llega en el paquete, pero se suaviza igual que el tuyo: a
+         15 Hz el ry salta a escalones y sin suavizar el amigo gira a
+         tirones. */
+      girarHacia(r.per, o.ry, dt);
+      r.g.rotation.y = 0;
+    } else {
+      if (r.per) r.per.raiz.visible = false;    // se guarda, no se destruye
+      r.cil.visible = true;
+      r.g.rotation.y = o.ry;
+    }
   });
   // Si a un amigo le falta UN paquete no lo borramos: reconstruir su avatar
   // significa crear una textura nueva para la etiqueta, y eso son milisegundos
@@ -2387,41 +2972,6 @@ function spec(k,v,em){
    ═══════════════════════════════════════════════════════════════ */
 const LAB = { modelos:{}, grupo:null, alambres:null, verAlambres:true, aviso:"", ruta:[] };
 
-/* Cada prop con sus colisionadores en el sistema del propio modelo: centro
-   de la caja envolvente en x=0,z=0 y base en y=0.
-   Los números de la silla NO son a ojo. Salen de lanzar rayos hacia abajo
-   sobre una rejilla de 1 cm y quedarse con la superficie de arriba, que es
-   donde un jugador se puede parar (la herramienta está en el banco de
-   pruebas, fuera del repo). El asiento salió plano al milímetro: del
-   percentil 10 al 90 hay 0,0 cm de desnivel. */
-const PROPS = {
-  /* BIDÓN. De pie, una caja cuadrada sobresale 11,7 cm en las esquinas y
-     te deja de pie sobre aire visible. Como los colisionadores se UNEN y
-     no se intersecan, la única forma de no sobresalir es que cada caja
-     quepa DENTRO del círculo (a²+b² ≤ R²). Tres cajas giradas 60° entre
-     sí, optimizadas para maximizar el radio mínimo de la unión, cubren el
-     89% del radio: el error pasa de +11,7 cm de aire a −3,0 cm de
-     hundimiento, que no se ve. Con 4 cajas serían −1,9 y con 6, −0,9.
-     Tumbado, la losa sobre la cresta (3,0 cm en el peor punto). */
-  bidon: { ruta:"modelos/barril/Barrel_01_1k.gltf",
-           dePie:   [ {c:[0,0.440,0], t:[0.252,0.880,0.504], yaw:0},
-                      {c:[0,0.440,0], t:[0.252,0.880,0.504], yaw:Math.PI/3},
-                      {c:[0,0.440,0], t:[0.252,0.880,0.504], yaw:2*Math.PI/3} ],
-           tumbado: [ {c:[0,0.513,0], t:[0.240,0.100,0.880], yaw:0} ] },
-
-  /* SILLA. Plana a trozos, que es donde el colisionador compuesto gana.
-     Asiento y respaldo salen del mapa de alturas por rayos; las patas no
-     salen ahí (están debajo del asiento) y se localizaron agrupando los
-     vértices de la geometría por debajo de 0,50 m. Se abren hacia abajo,
-     así que la sección de 0,07 cubre el ensanchado. */
-  silla: { ruta:"modelos/silla/painted_wooden_chair_02_1k.gltf",
-           asiento: { c:[0, 0.535,  0.060], t:[0.570, 0.100, 0.532] },
-           respaldo:{ c:[0, 0.924, -0.261], t:[0.629, 0.679, 0.131] },
-           patas: [ {c:[-0.231, 0.2425,  0.272], t:[0.07, 0.485, 0.07]},
-                    {c:[ 0.226, 0.2425,  0.272], t:[0.07, 0.485, 0.07]},
-                    {c:[-0.263, 0.2425, -0.212], t:[0.07, 0.485, 0.07]},
-                    {c:[ 0.263, 0.2425, -0.212], t:[0.07, 0.485, 0.07]} ] }
-};
 
 /* ═══════════════════════════════════════════════════════════════
    EL PERSONAJE DEL LABORATORIO
@@ -2484,6 +3034,72 @@ const GESTOS = [
   { tecla:"Digit9", clip:"Death",    nombre:"tumbarse",   modo:"quedarse" },
 ];
 
+GESTOS.forEach((g, i) => { g.i = i; });   // su número en la red: i+1
+
+/* ── EL PROTOCOLO ──────────────────────────────────────────────────
+   Todo el estado de animación de un jugador viaja en UN entero, `a`, que
+   se cuelga del paquete de posición que ya se mandaba. No hay mensaje
+   nuevo ni campo nuevo por cada cosa:
+
+     bits  0-3   velocidad, en 16 escalones de 0 a correr
+     bits  4-5   aire: 0 suelo · 1 salto · 2 doble salto · 3 cayendo
+     bits  6-9   gesto: 0 ninguno, 1-9
+     bits 10-13  contador de gesto, para poder repetir el mismo
+
+   Por qué así y no mandando el nombre de la animación: el servidor tiene
+   una optimización que NO se puede romper. Compara el mensaje repartido
+   con el anterior byte a byte y, si es igual, baja de 15 repartos por
+   segundo a uno. Eso ahorró ~59 GB al mes en una sala de cuatro con las
+   pestañas olvidadas. Un campo que cambie cada fotograma —una marca de
+   tiempo, el segundo exacto de la animación— la mata entera.
+
+   Este entero NO cambia cuando estás quieto: velocidad 0, sin aire, sin
+   gesto. Ni cuando estás sentado sin moverte. La deduplicación sigue
+   funcionando igual, y de paso el contador sólo cambia al empezar un
+   gesto, que pasa unas pocas veces por minuto.
+
+   Doce bytes de JSON por jugador y por paquete, y a cambio no hay que
+   adivinar nada en el otro extremo. */
+function empaquetarRed(){
+  const v = Math.hypot(G.vx, G.vz);
+  const vq = Math.max(0, Math.min(15, Math.round(v / Math.max(0.001, AV.runSpeed) * 15)));
+  let aire = 0;
+  if (!G.grounded) aire = G.vy > 0.6 ? (G.jumpsLeft <= 0 ? 2 : 1) : 3;
+  const gi = PERSONA.gesto ? PERSONA.gesto.i + 1 : 0;
+  return vq | (aire << 4) | (gi << 6) | ((PERSONA.gestoN & 15) << 10);
+}
+function desempaquetarRed(a){
+  a = (typeof a === "number" && Number.isFinite(a)) ? (a | 0) : 0;
+  return { v: (a & 15) / 15 * AV.runSpeed,
+           aire: (a >> 4) & 3,
+           gesto: (a >> 6) & 15,
+           n: (a >> 10) & 15 };
+}
+
+/* Hasta dónde se dibuja a un amigo como robot. Más lejos que esto no se
+   distingue un saludo de un tropiezo, así que sale el cilindro de siempre
+   —tres mallas contra diecinueve— y su mezclador ni se toca. En una torre
+   de 1.800 m lo normal es tener cero o un amigo dentro de este radio. */
+const DIST_ROBOT = 55;
+const DIST_ROBOT_SALE = 64;          // histéresis: ni parpadeos ni churn
+
+/* El interruptor.
+   En TRUE (como está ahora): el robot sale en la partida normal, para ti y
+   para tus amigos, y los nueve gestos se ven entre vosotros.
+   En FALSE: todo vuelve al cilindro naranja de siempre y los gestos se
+   quedan sólo en el laboratorio. Una línea, y nada más que tocar.
+
+   Lo que trae encendido, y conviene tenerlo presente: el robot mide 1,18 m
+   de ancho y la caja de colisión 0,70, así que en las cornisas estrechas se
+   le ven los hombros volando por fuera del borde. Eso no se arregla con
+   colisionadores —es el modelo, que es rechoncho—; se arregla con un
+   personaje más estrecho.
+
+   El protocolo NO depende de este interruptor: el entero de animación se
+   manda y se reparte en las dos posiciones. Por eso cambiarlo es de verdad
+   una línea y no volver a depurar la red. */
+const ROBOT_EN_JUEGO = true;
+
 const PERSONA = {
   ruta: "modelos/robot/RobotExpressive.glb",
   raiz: null, mixer: null, acc: {}, accGesto: {}, caja: null,
@@ -2491,38 +3107,45 @@ const PERSONA = {
   estado: "quieto", giro: 0, gesto: null, tinte: null,
 };
 
-function cargarPersona(cb){
-  if (PERSONA.raiz || PERSONA.intentado) return cb();
-  PERSONA.intentado = true;
-  if (typeof THREE.GLTFLoader !== "function"){ PERSONA.fallo = "sin cargador glTF"; return cb(); }
-  new THREE.GLTFLoader().load(PERSONA.ruta, (g) => {
+/* ── LA PLANTILLA ──────────────────────────────────────────────────
+   El .glb se carga UNA vez y de ahí salen todos los personajes: el tuyo y
+   el de cada amigo. La medida de la altura, el centrado y la conversión de
+   color también se hacen una sola vez, sobre la plantilla. */
+const MODELO = {
+  ruta: "modelos/robot/RobotExpressive.glb",
+  gltf: null, k: 1, cx: 0, cz: 0, minY: 0,
+  estado: "nada",              // nada · cargando · listo · fallo
+  fallo: "", cola: [],
+};
+
+function cargarModelo(cb){
+  if (MODELO.estado === "listo" || MODELO.estado === "fallo") return cb && cb();
+  if (cb) MODELO.cola.push(cb);
+  if (MODELO.estado === "cargando") return;
+  MODELO.estado = "cargando";
+  const acabar = (est, fallo) => {
+    MODELO.estado = est; MODELO.fallo = fallo || "";
+    const c = MODELO.cola; MODELO.cola = [];
+    for (const f of c) f();
+  };
+  if (typeof THREE.GLTFLoader !== "function") return acabar("fallo", "sin cargador glTF");
+
+  new THREE.GLTFLoader().load(MODELO.ruta, (g) => {
     const m = g.scene;
     /* El robot no tiene mapas, pero sí colores. glTF guarda baseColorFactor
-       en lineal y three lo copia tal cual a material.color; como este juego
+       en LINEAL y three lo copia tal cual a material.color; como este juego
        escribe el framebuffer sin corregir, ese valor lineal se muestra como
        si fuera sRGB y el robot sale apagado. convertLinearToSRGB() deja el
        número que hay que escribir para que se VEA el color correcto. Es el
-       mismo problema del bidón por otra puerta. */
-    /* Los materiales se hacen PROPIOS de esta copia antes de tocarlos.
-       three.js comparte los materiales al clonar una escena —comprobado—,
-       así que el día que haya un robot por cada amigo, teñir a uno los
-       teñiría a los ocho. Cuesta 7 objetos por personaje: nada.
-       Quien clone este modelo en el futuro tiene que volver a hacer esto. */
+       mismo problema que dejó el bidón negro, por otra puerta.
+       Se hace AQUÍ, una vez, sobre la plantilla: si se hiciera en cada copia
+       se convertiría dieciséis veces y cada amigo saldría de otro color. */
     m.traverse(o => {
       if (!o.isMesh) return;
-      o.frustumCulled = false;            // sus huesos lo sacan de su caja original
-      o.material = Array.isArray(o.material)
-        ? o.material.map(x => x.clone()) : o.material.clone();
-      for (const mat of (Array.isArray(o.material) ? o.material : [o.material])){
-        if (!mat) continue;
-        if (mat.color) mat.color.convertLinearToSRGB();
-        mat.needsUpdate = true;
-      }
+      o.frustumCulled = false;          // sus huesos lo sacan de su caja original
+      for (const mat of (Array.isArray(o.material) ? o.material : [o.material]))
+        if (mat && mat.color){ mat.color.convertLinearToSRGB(); mat.needsUpdate = true; }
     });
-
-    const mx = new THREE.AnimationMixer(m);
-    PERSONA.mixer = mx;
-    const clip = (n) => g.animations.find(a => a.name === n);
 
     /* Se mide la altura DEFORMADA (pasando los vértices por sus huesos).
        Box3.setFromObject() no vale con mallas con esqueleto: mide la pose
@@ -2532,8 +3155,8 @@ function cargarPersona(cb){
 
        Y no se mide la pose de enlace, se mide QUIETO: la pose de enlace es
        una postura de taller que nadie ve. Escalando por ella, el robot
-       parado quedaba en 1,64 m dentro de una caja de 1,70 y flotaba 6 cm de
-       aire sobre la cabeza. Se toma el instante MÁS ALTO de todo el ciclo
+       parado quedaba en 1,64 m dentro de una caja de 1,70 y le sobraban 6 cm
+       de aire sobre la cabeza. Se toma el instante MÁS ALTO de todo el ciclo
        de Idle, así que parado no sobresale nunca por arriba. */
     const cajaDeformada = () => {
       m.updateMatrixWorld(true);
@@ -2549,85 +3172,121 @@ function cargarPersona(cb){
       });
       return bb;
     };
-
-    const quieto = clip("Idle");
+    const quieto = g.animations.find(a => a.name === "Idle");
     let bb = null;
     if (quieto){
-      const a0 = mx.clipAction(quieto); a0.play();
+      const mx = new THREE.AnimationMixer(m);
+      mx.clipAction(quieto).play();
       for (let i = 0; i <= 12; i++){
         mx.setTime(quieto.duration * i / 12);
         const b2 = cajaDeformada();
         bb = bb ? bb.union(b2) : b2;
       }
-      mx.stopAllAction(); mx.setTime(0);
+      mx.stopAllAction(); mx.setTime(0); mx.uncacheRoot(m);
     } else bb = cajaDeformada();
 
     const alto = Math.max(1e-6, bb.getSize(new THREE.Vector3()).y);
-    const k = PERS_ALTO / alto;
     const c = bb.getCenter(new THREE.Vector3());
-    m.scale.multiplyScalar(k);
-    m.position.set(-c.x * k, -bb.min.y * k, -c.z * k);   // pies en y=0, centrado en x,z
-
-    const cont = new THREE.Group();
-    cont.add(m);
-    cont.visible = false;
-    W.scene.add(cont);
-    PERSONA.raiz = cont;
-    const bucle = (n) => { const c2 = clip(n); if (!c2) return null;
-      const a = mx.clipAction(c2); a.play(); a.setEffectiveWeight(0); return a; };
-    const unaVez = (n, t) => { const c2 = clip(n); if (!c2) return null;
-      const a = mx.clipAction(c2); a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true;
-      a.play(); a.setEffectiveWeight(0); if (t !== undefined){ a.paused = true; a.time = c2.duration * t; }
-      return a; };
-
-    /* No hay clip de "cayendo", así que se usa el de salto congelado al 58 %,
-       que es donde el robot lleva las piernas recogidas en el aire.
-
-       OJO, y esto me costó una prueba en rojo: mixer.clipAction(clip)
-       devuelve LA MISMA acción para el mismo clip. Pedirle dos veces el
-       clip "Jump" no da dos animaciones independientes, da un único objeto,
-       y entonces "saltando" y "cayendo" se peleaban por su peso y ninguno
-       llegaba a 1 (se quedaban a 0,47 cada uno). Hay que clonar el clip
-       para que sea otro clip y, con él, otra acción. */
-    const caerClip = clip("Jump") ? clip("Jump").clone() : null;
-    if (caerClip) caerClip.name = "Cayendo";
-    const accionCaer = caerClip
-      ? (() => { const a = mx.clipAction(caerClip);
-                 a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true;
-                 a.play(); a.setEffectiveWeight(0);
-                 a.paused = true; a.time = caerClip.duration * 0.58; return a; })()
-      : null;
-
-    /* quieto/andar/correr son continuos y se MEZCLAN por velocidad: con el
-       joystick analógico del móvil la velocidad es un número, no un
-       interruptor, y la animación puede seguirlo. Los de aire son disparos. */
-    PERSONA.acc = {
-      quieto: bucle("Idle"),
-      andar:  bucle("Walking"),
-      correr: bucle("Running"),
-      salto:  unaVez("Jump"),
-      doble:  unaVez("WalkJump"),
-      caer:   accionCaer,
-    };
-    /* Los nueve gestos, cada uno con su acción. Aquí no hay el problema de
-       la acción compartida que tuvo "caer": son nueve clips distintos. */
-    PERSONA.accGesto = {};
-    for (const g of GESTOS){
-      const c2 = clip(g.clip);
-      if (!c2) continue;
-      const a = mx.clipAction(c2);
-      a.setLoop(g.modo === "bucle" ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
-      a.clampWhenFinished = (g.modo !== "bucle");
-      a.play(); a.setEffectiveWeight(0);
-      PERSONA.accGesto[g.clip] = a;
-    }
-    if (!PERSONA.acc.quieto || !PERSONA.acc.correr) PERSONA.fallo = "faltan clips";
-    tintarPersona(G.color);       // el color que ya le tocó por su nombre
-    cb();
+    MODELO.k = PERS_ALTO / alto;
+    MODELO.cx = c.x; MODELO.cz = c.z; MODELO.minY = bb.min.y;
+    MODELO.gltf = g;
+    acabar("listo");
   }, undefined, (e) => {
-    console.error("[lab] no cargó el personaje:", e);
-    PERSONA.fallo = "no cargó modelos/robot/ · ¿está en la imagen?";
-    cb();
+    console.error("[personaje] no cargó:", e);
+    acabar("fallo", "no cargó modelos/robot/ · ¿está en la imagen?");
+  });
+}
+
+/* ── LA FÁBRICA ────────────────────────────────────────────────────
+   Un personaje independiente: su copia de la malla, sus materiales, su
+   esqueleto, su mezclador y sus acciones. Sirve igual para ti y para cada
+   amigo; lo único que cambia es de dónde salen las órdenes. */
+function nuevoPersonaje(color){
+  const g = MODELO.gltf;
+  if (!g) return null;
+  /* clone() a secas NO vale: deja las copias apuntando a los huesos del
+     original y las dieciséis se mueven idénticas y pegadas al primero.
+     SkeletonUtils.clone() rehace el esqueleto de cada copia. */
+  const clonar = (THREE.SkeletonUtils && THREE.SkeletonUtils.clone) || null;
+  if (!clonar) return null;
+  const m = clonar(g.scene);
+
+  /* Los materiales también se comparten al clonar —comprobado—, así que si
+     no se individualizan, teñir a un amigo los tiñe a los ocho. Son 7
+     objetos por personaje: nada. */
+  m.traverse(o => {
+    if (!o.isMesh) return;
+    o.frustumCulled = false;
+    o.material = Array.isArray(o.material) ? o.material.map(x => x.clone()) : o.material.clone();
+  });
+
+  m.scale.multiplyScalar(MODELO.k);
+  m.position.set(-MODELO.cx * MODELO.k, -MODELO.minY * MODELO.k, -MODELO.cz * MODELO.k);
+
+  const cont = new THREE.Group();
+  cont.add(m);
+
+  const mx = new THREE.AnimationMixer(m);
+  const clip = (n) => g.animations.find(a => a.name === n);
+  const bucle = (n) => { const c2 = clip(n); if (!c2) return null;
+    const a = mx.clipAction(c2); a.play(); a.setEffectiveWeight(0); return a; };
+  const unaVez = (n) => { const c2 = clip(n); if (!c2) return null;
+    const a = mx.clipAction(c2); a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true;
+    a.play(); a.setEffectiveWeight(0); return a; };
+
+  /* No hay clip de "cayendo", así que se usa el de salto congelado al 58 %,
+     que es donde el robot lleva las piernas recogidas en el aire.
+
+     OJO, y esto me costó una prueba en rojo: mixer.clipAction(clip) devuelve
+     LA MISMA acción para el mismo clip. Pedirle dos veces "Jump" no da dos
+     animaciones independientes, da un único objeto, y entonces "saltando" y
+     "cayendo" se peleaban por su peso y ninguno pasaba de 0,47. Hay que
+     clonar el clip para que sea otro clip y, con él, otra acción. */
+  const caerClip = clip("Jump") ? clip("Jump").clone() : null;
+  if (caerClip) caerClip.name = "Cayendo";
+  let accionCaer = null;
+  if (caerClip){
+    accionCaer = mx.clipAction(caerClip);
+    accionCaer.setLoop(THREE.LoopOnce, 1); accionCaer.clampWhenFinished = true;
+    accionCaer.play(); accionCaer.setEffectiveWeight(0);
+    accionCaer.paused = true; accionCaer.time = caerClip.duration * 0.58;
+  }
+
+  const P = {
+    raiz: cont, mixer: mx, malla: m,
+    acc: { quieto:bucle("Idle"), andar:bucle("Walking"), correr:bucle("Running"),
+           salto:unaVez("Jump"), doble:unaVez("WalkJump"), caer:accionCaer },
+    accGesto: {},
+    estado: "quieto", giro: 0, gesto: null, gestoN: 0, tinte: null,
+    _gClip: null, _gN: -1,
+  };
+  for (const gg of GESTOS){
+    const c2 = clip(gg.clip);
+    if (!c2) continue;
+    const a = mx.clipAction(c2);
+    a.setLoop(gg.modo === "bucle" ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
+    a.clampWhenFinished = (gg.modo !== "bucle");
+    a.play(); a.setEffectiveWeight(0);
+    P.accGesto[gg.clip] = a;
+  }
+  if (color) tintar(P, color);
+  return P;
+}
+
+/* Prepara TU personaje. Se llama al empezar partida y al abrir el lab. */
+function cargarPersona(cb){
+  cargarModelo(() => {
+    if (MODELO.estado !== "listo"){ PERSONA.fallo = MODELO.fallo; return cb && cb(); }
+    if (!PERSONA.raiz){
+      const P = nuevoPersonaje(G.color);
+      if (!P){ PERSONA.fallo = "sin SkeletonUtils: no se puede clonar el esqueleto";
+               return cb && cb(); }
+      Object.assign(PERSONA, P);
+      PERSONA.fallo = "";
+      PERSONA.raiz.visible = false;
+      W.scene.add(PERSONA.raiz);
+    }
+    cb && cb();
   });
 }
 
@@ -2654,15 +3313,16 @@ function rehacerCajaPersona(){
    juego escribe el color tal cual al framebuffer, así que sale exactamente
    el color que elegiste. (El color que traía el modelo sí hubo que
    convertirlo, porque glTF lo guarda en lineal. No es lo mismo.) */
-function tintarPersona(hex){
-  if (!PERSONA.raiz || !hex) return;
-  PERSONA.tinte = hex;
-  PERSONA.raiz.traverse(o => {
+function tintar(P, hex){
+  if (!P || !P.raiz || !hex) return;
+  P.tinte = hex;
+  P.raiz.traverse(o => {
     if (!o.isMesh) return;
     for (const m of (Array.isArray(o.material) ? o.material : [o.material]))
       if (m && m.name === "Main") m.color.set(hex);
   });
 }
+function tintarPersona(hex){ tintar(PERSONA, hex); }
 
 function gestoPorTecla(code){ return GESTOS.find(g => g.tecla === code) || null; }
 
@@ -2675,6 +3335,7 @@ function iniciarGesto(g){
   const a = PERSONA.accGesto[g.clip];
   if (!a || !G.grounded || Math.hypot(G.vx, G.vz) > 0.35) return false;
   PERSONA.gesto = g;
+  PERSONA.gestoN = (PERSONA.gestoN + 1) & 15;   // para que repetir el mismo se note
   a.reset(); a.play();
   return true;
 }
@@ -2709,29 +3370,61 @@ function estadoPersona(){
   return "sueloMezcla";
 }
 
-function actualizarPersona(dt){
-  if (!PERSONA.raiz || !PERSONA.mixer) return;
-  const A = PERSONA.acc;
-  const v = Math.hypot(G.vx, G.vz);
-  revisarGesto();
-  const nuevo = estadoPersona();
+/* ── ANIMAR UN PERSONAJE, SEA DE QUIEN SEA ─────────────────────────
+   Recibe lo mismo venga de tu teclado o del paquete de un amigo:
 
-  /* Los gestos que no están sonando se apagan siempre, también mientras
-     corres: si no, el peso que le quedó a uno se queda ahí sumándose para
-     siempre y el robot anda con el brazo levantado. */
+     e.v      velocidad en m/s
+     e.aire   0 suelo · 1 salto · 2 doble · 3 cayendo
+     e.gesto  0 ninguno, 1-9
+     e.n      contador del gesto
+
+   Que tu personaje y el de tus amigos pasen por la MISMA función no es
+   elegancia: es que cualquier fallo lo vas a ver en tu propia pantalla en
+   vez de que lo sufra el otro sin que te enteres. */
+function animarPersonaje(P, dt, e){
+  if (!P || !P.mixer) return;
+  const A = P.acc;
+  const clipGesto = (e.gesto && GESTOS[e.gesto - 1]) ? GESTOS[e.gesto - 1].clip : null;
+
+  /* Rearmar el gesto: cambia el gesto, o el contador. El contador es lo
+     que permite repetir el MISMO gesto dos veces seguidas — sin él, darle
+     otra vez a la tecla 1 no se notaría al otro lado porque el paquete
+     diría exactamente lo mismo. */
+  if (clipGesto && (P._gClip !== clipGesto || P._gN !== e.n)){
+    const a = P.accGesto[clipGesto];
+    if (a){ a.reset(); a.play(); }
+    P._gClip = clipGesto; P._gN = e.n;
+  }
+  if (!clipGesto) P._gClip = null;
+
+  /* Los gestos que no suenan se apagan SIEMPRE, también mientras corres:
+     si no, el peso que le quedó a uno se queda sumándose para siempre y el
+     robot acaba corriendo con el brazo levantado. */
   for (const g of GESTOS){
-    const a = PERSONA.accGesto[g.clip];
-    if (a) peso(a, (PERSONA.gesto && PERSONA.gesto.clip === g.clip) ? 1 : 0, dt);
+    const a = P.accGesto[g.clip];
+    if (a) peso(a, clipGesto === g.clip ? 1 : 0, dt);
   }
 
-  if (nuevo === "gesto"){
-    for (const k of ["quieto","andar","correr","salto","doble","caer"]) peso(A[k], 0, dt);
-    PERSONA.estado = "gesto";
-  } else if (nuevo === "sueloMezcla"){
+  const apagarLoco = (salvo) => {
+    for (const k of ["quieto","andar","correr","salto","doble","caer"])
+      peso(A[k], k === salvo ? 1 : 0, dt);
+  };
+
+  if (clipGesto){
+    apagarLoco(null);
+    P.estado = "gesto";
+  } else if (e.aire){
+    const nom = e.aire === 1 ? "salto" : e.aire === 2 ? "doble" : "caer";
+    apagarLoco(nom);
+    if (nom !== P.estado && (nom === "salto" || nom === "doble") && A[nom]){
+      A[nom].reset(); A[nom].play();          // el disparo se rearma cada vez
+    }
+    P.estado = nom;
+  } else {
     /* Mezcla continua quieto → andar → correr según la velocidad real.
        Sin esto, pasar de andar a correr es un salto de fotograma que se ve
-       como un tirón; con el stick analógico se notaría todo el rato. */
-    const wa = AV.walkSpeed, wr = AV.runSpeed;
+       como un tirón; con el stick analógico del móvil se notaría siempre. */
+    const wa = AV.walkSpeed, wr = AV.runSpeed, v = e.v;
     let pQuieto = 0, pAndar = 0, pCorrer = 0;
     if (v <= wa){ const t = clamp(v / Math.max(0.001, wa), 0, 1); pQuieto = 1 - t; pAndar = t; }
     else { const t = clamp((v - wa) / Math.max(0.001, wr - wa), 0, 1); pAndar = 1 - t; pCorrer = t; }
@@ -2741,38 +3434,49 @@ function actualizarPersona(dt){
        velocidad a la que el juego mueve el cuerpo. */
     if (A.andar)  A.andar.timeScale  = clamp(v / VEL_CLIP.andar,  0.35, 4);
     if (A.correr) A.correr.timeScale = clamp(v / VEL_CLIP.correr, 0.35, 4);
-    PERSONA.estado = v < 0.25 ? "quieto" : (v < (AV.walkSpeed+AV.runSpeed)/2 ? "andar" : "correr");
-  } else {
-    for (const k of ["quieto","andar","correr","salto","doble","caer"])
-      peso(A[k], k === nuevo ? 1 : 0, dt);
-    if (nuevo !== PERSONA.estado && (nuevo === "salto" || nuevo === "doble") && A[nuevo]){
-      A[nuevo].reset(); A[nuevo].play();       // el disparo se rearma cada vez
-    }
-    PERSONA.estado = nuevo;
+    P.estado = v < 0.25 ? "quieto" : (v < (wa + wr) / 2 ? "andar" : "correr");
   }
 
-  PERSONA.mixer.update(dt);
+  P.mixer.update(dt);
+}
 
-  /* El rótulo se repinta SÓLO cuando cambia el estado. Hacerlo cada
+/* Gira suave hacia una dirección. Con un cilindro el giro instantáneo daba
+   igual; con un personaje se ve como un latigazo. 0,10 s de constante: una
+   media vuelta tarda unos 20 fotogramas. Con 0,06 tardaba 4 y seguía
+   pareciendo un tirón; mucho más se empieza a sentir blando. */
+function girarHacia(P, objetivo, dt){
+  let d = objetivo - P.giro;
+  while (d >  Math.PI) d -= 2*Math.PI;
+  while (d < -Math.PI) d += 2*Math.PI;
+  P.giro += d * (1 - Math.exp(-dt / 0.10));
+  P.raiz.rotation.y = P.giro;
+}
+
+/* TU personaje: las órdenes salen del estado del juego, no de la red. */
+function actualizarPersona(dt){
+  if (!PERSONA.raiz || !PERSONA.mixer) return;
+  revisarGesto();
+  const v = Math.hypot(G.vx, G.vz);
+  let aire = 0;
+  if (!G.grounded) aire = G.vy > 0.6 ? (G.jumpsLeft <= 0 ? 2 : 1) : 3;
+
+  animarPersonaje(PERSONA, dt, {
+    v, aire,
+    gesto: PERSONA.gesto ? PERSONA.gesto.i + 1 : 0,
+    n: PERSONA.gestoN,
+  });
+
+  /* El rótulo del lab se repinta SÓLO cuando cambia el estado. Hacerlo cada
      fotograma sería reescribir el HTML 60 veces por segundo para que casi
      siempre ponga lo mismo. */
-  if (PERSONA.estado !== PERSONA._pintado){ PERSONA._pintado = PERSONA.estado; pintarLab(); }
+  if (G.lab && PERSONA.estado !== PERSONA._pintado){
+    PERSONA._pintado = PERSONA.estado; pintarLab();
+  }
 
   PERSONA.raiz.position.set(G.px, G.py - HY, G.pz);
-  /* El robot mira a +Z, que es exactamente lo que produce atan2(vx,vz).
-     Se gira suave: con un muñeco cilíndrico el giro instantáneo daba igual,
-     con un personaje se ve como un tirón.
-     0,10 s de constante: una media vuelta completa tarda unos 10 fotogramas
-     (~0,17 s). Con 0,06 tardaba 4 y a ojo seguía siendo un latigazo; subir
-     mucho más empieza a sentirse blando en un juego de saltos finos. */
-  if (v > 0.6){
-    const obj = Math.atan2(G.vx, G.vz);
-    let d = obj - PERSONA.giro;
-    while (d >  Math.PI) d -= 2*Math.PI;
-    while (d < -Math.PI) d += 2*Math.PI;
-    PERSONA.giro += d * (1 - Math.exp(-dt / 0.10));
-  }
-  PERSONA.raiz.rotation.y = PERSONA.giro;
+  // el robot mira a +Z, que es exactamente lo que produce atan2(vx,vz)
+  if (v > 0.6) girarHacia(PERSONA, Math.atan2(G.vx, G.vz), dt);
+  else PERSONA.raiz.rotation.y = PERSONA.giro;
 
   if (PERSONA.caja) PERSONA.caja.position.set(G.px, G.py, G.pz);
 }
@@ -2833,13 +3537,44 @@ function cargarProps(cb){
       }
     });
     m.updateMatrixWorld(true);
+
+    /* De la misma descarga salen las dos cosas: el contenedor que clona el
+       laboratorio y la geometría suelta que instancia la torre. Cargar el
+       archivo dos veces sería descargarlo una (el navegador lo cachea) pero
+       analizarlo dos, y eso sí se paga. */
+    let malla = null;
+    m.traverse(o => { if (o.isMesh && !malla) malla = o; });
+    if (malla){
+      if (n === "bidon"){
+        PROPMOD.bidon  = { geo: prepararGeoProp(malla, false), mat: malla.material };
+        PROPMOD.bidonT = { geo: prepararGeoProp(malla, true),  mat: malla.material };
+      } else {
+        PROPMOD[n] = { geo: prepararGeoProp(malla, false), mat: malla.material };
+      }
+    }
+
     const bb = new THREE.Box3().setFromObject(m);
     const d = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3());
     m.position.set(-c.x, -bb.min.y, -c.z);   // base al suelo, centrado en x,z
     const cont = new THREE.Group(); cont.add(m);
     LAB.modelos[n] = { obj:cont, d };
     listo();
-  }, undefined, (e) => { console.error("[lab] no cargó " + n + ":", e); fallos.push(n); listo(); });
+  }, undefined, (e) => { console.error("[props] no cargó " + n + ":", e); fallos.push(n); listo(); });
+}
+
+/* Los objetos en la partida normal. Asíncrono a propósito: la torre se ve
+   entera desde el primer fotograma y los bidones y las sillas aparecen
+   cuando llegan (324 KB entre los dos). Si no llegan, se juega igual: el
+   generador ya puso sus colisionadores, así que los saltos siguen siendo
+   los mismos aunque no se vea el objeto — feo, pero jugable. */
+function prepararProps(){
+  if (PROPMOD.listo || PROPMOD.cargando) return;
+  PROPMOD.cargando = true;
+  cargarProps(() => {
+    PROPMOD.cargando = false;
+    PROPMOD.listo = !!(PROPMOD.bidon && PROPMOD.silla);
+    if (PROPMOD.listo && G.tower) buildMeshes(G.tower);   // ahora sí se dibujan
+  });
 }
 
 function montarLab(){
@@ -3144,8 +3879,24 @@ function alternarAlambres(){
 $("labinfo").addEventListener("click", alternarAlambres);
 $("labinfo").addEventListener("touchstart", (e) => { e.preventDefault(); alternarAlambres(); }, {passive:false});
 
+/* Enciende TU personaje en la partida normal. Es asíncrono a propósito: el
+   modelo pesa 453 KB y no se puede hacer esperar al juego por él. Hasta que
+   llega —o si no llega— se juega con el cilindro de siempre y no se rompe
+   nada. */
+function prepararPersonaje(){
+  if (!ROBOT_EN_JUEGO || PERSONA.activo) return;
+  cargarPersona(() => {
+    if (!PERSONA.raiz || PERSONA.fallo) return;      // se queda el cilindro
+    PERSONA.activo = true;
+    PERSONA.raiz.visible = true;
+    if (W.player) W.player.visible = false;
+  });
+}
+
 function play(){
   G.mode="play"; G.elapsed=0; G.best=0; G.worst=0; G.won=false;
+  prepararPersonaje();
+  prepararProps();
   respawn();
   $("menu").hidden=true; $("pause").hidden=true; $("win").hidden=true;
   $("hud").classList.add("on");
@@ -3284,13 +4035,15 @@ addEventListener("keydown",e=>{
         pintarLab(); return;
       }
     }
-    /* Gestos con las cifras. Se miran ANTES del guardia de repetición pero
-       sólo en el primer pulsado: dejar la tecla apretada no tiene que
-       reiniciar el saludo sesenta veces por segundo. */
-    if (!G.keys[e.code]){
-      const g = gestoPorTecla(e.code);
-      if (g){ iniciarGesto(g); pintarLab(); }
-    }
+  }
+  /* Gestos con las cifras, DENTRO Y FUERA del laboratorio: para eso se hizo
+     todo esto. Se miran antes del guardia de repetición pero sólo en el
+     primer pulsado — dejar la tecla apretada no tiene que reiniciar el
+     saludo sesenta veces por segundo. */
+  if (PERSONA.activo && G.mode === "play" && !e.ctrlKey && !e.altKey && !e.metaKey
+      && !G.keys[e.code]){
+    const g = gestoPorTecla(e.code);
+    if (g){ iniciarGesto(g); if (G.lab) pintarLab(); }
   }
   if (G.lab && e.code==="KeyP" && !G.keys["KeyP"] && PERSONA.raiz && !PERSONA.fallo){
     PERSONA.activo = !PERSONA.activo;
@@ -3309,17 +4062,50 @@ addEventListener("keydown",e=>{
 });
 addEventListener("keyup",e=>{ G.keys[e.code]=false; });
 addEventListener("blur",()=>{ G.keys=Object.create(null); });
+/* EL GIRO DE CÁMARA QUE TE TIRA DEL SALTO.
+   Aquí no había ningún límite a lo que podía mover un solo evento:
+
+       G.yaw -= e.movementX*0.0022;
+
+   Con esa sensibilidad, un evento de 1.200 px gira la cámara 151 GRADOS de
+   golpe. Medido con el manejador de verdad. Si eso te pilla en el aire, te
+   cambia la dirección de la carrera y te caes — que es exactamente el
+   síntoma: "de vez en cuando la vista apunta a otro lado".
+
+   ¿De dónde salen esos deltas? De más de un sitio, y por eso no se intenta
+   arreglar el origen sino aguantar el golpe:
+     · `dragging` se activa en el mousedown y lock() es ASÍNCRONO, así que
+       hay unos fotogramas leyendo deltas SIN bloqueo, justo mientras el
+       navegador desplaza el cursor para bloquearlo.
+     · ratones y controladores que sueltan valores absurdos. Está
+       documentado en juegos web y no se arregla desde el juego.
+
+   Dos filtros, y los dos con números razonados:
+     · 260 px por evento. Un giro humano muy rápido —media vuelta en 150 ms
+       a 125 Hz— son unos 75 px por evento; 260 es más de tres veces eso, y
+       equivale a 33° de un tirón, que ninguna mano produce en un evento.
+     · 120 ms de gracia tras conseguir el bloqueo, que es cuando llega el
+       desplazamiento del cursor.
+   Los descartes se cuentan y salen en el HUD: si el fallo vuelve a pasar y
+   el contador sigue a cero, es que era otra cosa y hay que mirar en otro
+   sitio. */
+const MIRA_MAX_PX = 260;
+const GRACIA_LOCK = 120;
+let tBloqueo = 0;
+
 document.addEventListener("mousemove",e=>{
   if (G.mode!=="play") return;
   const locked=document.pointerLockElement===W.renderer.domElement;
   if (!locked && !dragging) return;
-  G.yaw   -= e.movementX*0.0022;
-  G.pitch -= e.movementY*0.0022;
-  G.pitch = clamp(G.pitch,-1.25,0.95);
+  const mx = e.movementX || 0, my = e.movementY || 0;
+  if (performance.now() - tBloqueo < GRACIA_LOCK) return;
+  if (Math.abs(mx) > MIRA_MAX_PX || Math.abs(my) > MIRA_MAX_PX){ G.saltosRaton++; return; }
+  G.yaw   -= mx*0.0022;
+  G.pitch  = clamp(G.pitch - my*0.0022, -1.25, 0.95);
 });
 document.addEventListener("pointerlockchange",()=>{
   const locked=document.pointerLockElement===W.renderer.domElement;
-  if (locked){ hadLock=true; return; }
+  if (locked){ hadLock=true; tBloqueo = performance.now(); return; }
   if (hadLock && G.mode==="play") pause();
   hadLock=false;
 });
@@ -3493,7 +4279,11 @@ if (/\bdebug\b/.test(location.hash)){
                  remotosCount:()=>remotos.size,
                  abrirLab, salirLab, LAB, alternarAlambres,
                  PERSONA, TALLA, VEL_CLIP, actualizarPersona, estadoPersona,
-                 GESTOS, iniciarGesto, pararGesto, tintarPersona, colorJugador, PALETA,
+                 GESTOS, iniciarGesto, pararGesto, tintarPersona, tintar, colorJugador, PALETA,
+                 MODELO, cargarModelo, nuevoPersonaje, animarPersonaje, prepararPersonaje,
+                 PROPMOD, prepararProps, cargarProps, PROPS, PROP_DIM, PROP_PISA,
+                 empaquetarRed, desempaquetarRed, DIST_ROBOT, DIST_ROBOT_SALE, ROBOT_EN_JUEGO,
+                 remotos, syncRemotos,
                  ajustarCaja, restaurarCaja, CAJA_0,
                  caja:()=>({hx:HX,hy:HY,hz:HZ}),
                  physicsStep, resolveCollisions, updateShadow, hitsSolid,

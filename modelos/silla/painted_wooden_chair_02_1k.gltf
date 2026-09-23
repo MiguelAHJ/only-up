@@ -76,17 +76,17 @@
     {
       "mimeType": "image/jpeg",
       "name": "painted_wooden_chair_02_nor_gl",
-      "uri": "textures/painted_wooden_chair_02_nor_gl_1k.jpg"
+      "uri": "textures/painted_wooden_chair_02_nor_gl_1k.webp"
     },
     {
       "mimeType": "image/jpeg",
       "name": "painted_wooden_chair_02_diff",
-      "uri": "textures/painted_wooden_chair_02_diff_1k.jpg"
+      "uri": "textures/painted_wooden_chair_02_diff_1k.webp"
     },
     {
       "mimeType": "image/jpeg",
       "name": "painted_wooden_chair_02_rough",
-      "uri": "textures/painted_wooden_chair_02_arm_1k.jpg"
+      "uri": "textures/painted_wooden_chair_02_arm_1k.webp"
     }
   ],
   "accessors": [

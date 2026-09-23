@@ -1,3 +1,211 @@
+# Cambios — 23 de septiembre de 2026 (vigesimotercer lote): sonido, ajustes, récords y la torre del día
+
+Te pasé una lista de recomendaciones y me dijiste que las hiciera todas menos
+el healthcheck de Coolify y el ancho del robot. Aquí están, más lo que aprendí
+por el camino y una que decidí **no** mandarte.
+
+---
+
+## 1 · El juego tenía cero sonido. Ahora no
+
+Ni una referencia a audio en 207 KB. Se jugaba en mudo.
+
+Todo está **sintetizado con la Web Audio API**: ruido filtrado para el viento
+y los pasos, osciladores con envolvente para los golpes. Cero archivos, cero
+KB de descarga, cero licencias que revisar, y cada sonido se afina cambiando
+un número.
+
+| | qué suena |
+|---|---|
+| viento | arrecia con la altura, y mucho más al caer |
+| salto | barrido de 230 a 430 Hz |
+| doble salto | más agudo a propósito: se reconoce sin mirar el HUD |
+| aterrizaje | golpe grave, **pesa según la velocidad con la que llegas** |
+| pasos | por DISTANCIA recorrida, no por tiempo — el ritmo cuadra solo con la velocidad |
+| caída al vacío | barrido hacia abajo |
+| cima | cuatro notas |
+
+Tres cosas que este módulo tenía que respetar y respeta:
+
+- El navegador **no deja crear audio sin un gesto del jugador**, así que el
+  contexto nace en la primera tecla o clic, no al cargar.
+- Si el audio falla, el juego sigue. Hay una prueba que **borra
+  `AudioContext` del navegador** y comprueba que se puede jugar igual.
+- El bucle llama al viento 60 veces por segundo: es un único grafo permanente
+  al que sólo se le mueven dos valores. No se crea nada por fotograma.
+
+**M silencia**, en partida y en pausa. Se recuerda entre visitas.
+
+## 2 · Ajustes de calidad — la cura que faltaba
+
+En el lote 21 le pusimos a tu amigo un medidor de fps para diagnosticar los
+tirones. Le dimos el diagnóstico **y ningún mando que tocar**. Esto es el mando.
+
+Tres niveles, en el menú **y en la pantalla de pausa** — porque los tirones se
+sufren jugando, y mandar al jugador al menú es perderle la partida:
+
+| | BAJA | MEDIA | ALTA |
+|---|---|---|---|
+| resolución | 60 % | 85 % | 100 % |
+| nubes | 1 | 2 | 3 |
+| el robot pasa a cilindro a | 26 m | 42 m | 55 m |
+| suavizado de bordes | no | sí | sí |
+
+Al arrancar **mide tres segundos** con el menú en marcha —que dibuja la torre
+entera, así que es carga real— y propone un nivel. Si el jugador elige alguna
+vez, su decisión manda para siempre y la detección no vuelve a tocarla. Hay
+una prueba para eso.
+
+El suavizado de bordes es la excepción y la interfaz lo dice en voz alta: es
+una opción **del constructor** del renderizador, no se puede cambiar sin
+rehacerlo entero, y rehacerlo se llevaría por delante el bloqueo del puntero.
+Se lee al arrancar y se aplica al recargar.
+
+Lo que **no** se toca: la niebla y el plano lejano. Ahorran poco —la torre es
+alta y estrecha, no hay mundo lejano que recortar— y cambian el aspecto del
+juego. Un ajuste de rendimiento no debería cambiar el arte.
+
+## 3 · El récord ya no se pierde
+
+Esto me sorprendió al mirarlo: en `localStorage` sólo vivía el nombre.
+`G.best` se ponía a cero en cada partida, así que quien llegaba a 1.400 m y
+cerraba la pestaña **no dejaba rastro**.
+
+Ahora se guarda la mejor altura por dificultad, y el mejor tiempo **sólo si se
+llegó arriba** (un tiempo de una partida a medias no se puede comparar con
+nada). Se ve en cada botón de dificultad, en la pausa y al coronar.
+
+Se anota al pausar, al volver al menú, al caerse al vacío, al ganar, y además
+en `pagehide` y al ocultar la pestaña: cerrar el navegador a media subida no
+puede costarte el récord.
+
+## 4 · La torre del día
+
+Tu mejor activo es que **la generación es determinista**, y no lo estaba
+aprovechando nadie. Una semilla derivada de la fecha basta para que todo el
+mundo suba exactamente la misma torre: sin servidor, sin cuentas, sin base de
+datos.
+
+Botón propio junto a las dificultades, con su semilla (`DIA-20260923`), su
+fecha a la vista y **su récord aparte**.
+
+La fecha se toma en **UTC**, y no es un detalle: con hora local, tú en
+Venezuela y tu amigo en España estarías seis horas al día subiendo torres
+distintas y comparando tiempos de dos mapas diferentes sin enteraros.
+
+## 5 · El color, ahora en sRGB
+
+Este era el cambio arriesgado y **quiero que lo mires antes de darlo por bueno**.
+
+El renderizador dibujaba con el encoding por defecto de three, que es lineal.
+Un color escrito como `#8A4A2B` —un número pensado para una pantalla— se
+mandaba tal cual sin la curva que le toca. El juego entero salía más apagado
+de lo que pedía su propia paleta, y **había tres apaños en el archivo que
+existían sólo por eso**: uno para el robot, uno para las texturas del bidón y
+la silla, y un comentario explicando por qué la paleta no se convertía.
+
+Los tres han desaparecido. Ahora hay una sola regla sin excepciones: lo que se
+escribe a mano se convierte a lineal, las texturas de color se marcan sRGB, y
+lo que viene de un glTF ya es lineal y no se toca.
+
+### Cómo se reajustó, que aquí está lo interesante
+
+Con el cambio puesto, la imagen salía más clara. Para saber **qué** bajar medí
+la luminancia de tres encuadres fijos, por zonas, contra las mismas capturas
+de antes. Tres hipótesis, dos muertas:
+
+1. **«Sobra luz.»** Bajé las cuatro luces un 40 %. El error medio pasó de
+   5,4 % a 5,2 %. Nada.
+2. **«Es la niebla, que ahora se mezcla en lineal.»** Barrí la densidad de 1,0
+   a 0,5: 0.3728, 0.3720, 0.3724, 0.3723. Idéntico. Tampoco.
+3. **«Son las nubes.»** Sí. Tres planos grandes y transparentes que cubren
+   toda la parte baja del encuadre. A media opacidad, el error medio cae de
+   7,5 % a 5,4 % y la peor zona de +24 % a +12 %.
+
+Los dos mandos que no movían una medida **no se quedaron en el código**. Un
+ajuste que no cambia nada es decoración.
+
+El 12 % que sigue arriba es el cambio real de tubería, no un fallo tapado. Si
+al verlo en movimiento prefieres el aspecto de antes, se revierte: es un
+bloque acotado.
+
+## 6 · Lo que NO te mando: fusionar las mallas del robot
+
+Lo intenté y lo paré. Lo que se midió:
+
+- un robot cuesta **exactamente 19 llamadas de dibujo** (36 con él, 17 sin él)
+- son **4 mallas con esqueleto** (las manos) y **15 mallas normales colgadas
+  de huesos**
+- sólo hay 3 materiales: Main, Grey y Black
+- las 4 con esqueleto traen 4 objetos `Skeleton` distintos pero con
+  exactamente la misma lista de huesos
+
+O sea que el premio está en las 15 normales: fusionando sólo las otras se
+pasaría de 19 a **18**. Y convertir una malla colgada de un hueso en vértices
+con peso 1 obliga a reescribir cada vértice contra la pose de enlace, y ahí
+three aplica la escala dos veces — **el mismo problema que ya nos mordió
+midiendo la altura del personaje**, cuando me dijo que medía 1,8 cm.
+
+Se puede hacer, es un lote propio con sus pruebas, y el beneficio sólo se nota
+con varios amigos en la sala. Queda medido y sin tocar, que es más útil que
+medio hecho.
+
+---
+
+## Las pruebas
+
+`test/lote23.js`: 26 comprobaciones sobre sonido, ajustes, récords y torre del
+día. Y como siempre, lo que le da valor no es que esté verde: **se rompió el
+juego a propósito cuatro veces y se puso roja las cuatro**.
+
+| se rompió | saltó |
+|---|---|
+| el viento deja de subir con la altura | «el viento arrecia con la altura» |
+| el récord se pisa siempre | «una partida peor no borra el récord» |
+| la calidad no toca la resolución | «bajar la calidad baja la resolución de verdad» |
+| el doble salto suena como el primero | «el segundo suena a doble» |
+
+Dos veces la prueba estuvo mal y el juego bien, y las dos merece la pena
+contarlas porque son trampas que repito:
+
+- Medía el viento leyendo `gain.value` justo después de pedirlo.
+  `setTargetAtTime` **persigue** el valor en el hilo de audio, así que leía el
+  de antes: daba 0.005 a 50 m y 0.005 a 1.150 m. Se partió la regla en una
+  función pura (`calcViento`) y ahora se comprueba la regla, no la
+  interpolación.
+- Guardaba cuatro «fotos» del récord… que eran **cuatro referencias al mismo
+  objeto**, mutado en el sitio. Las cuatro mostraban el estado final y la
+  prueba comprobaba aire.
+
+Y una prueba anterior hubo que ponerla al día: `gestos.js` comparaba el color
+del material contra el hex de la paleta. Con sRGB el material guarda el color
+en **lineal** (`#FF6B2C` vive dentro como `ff2506`), así que ahora se compara
+lo que se VE, con 2 de margen por canal porque la ida y vuelta en 8 bits no es
+exacta (`#FF6B2C` vuelve como `#FE6B2C`).
+
+## Que nada se rompió
+
+| | resultado |
+|---|---|
+| generador (20 semillas × 3 dificultades) | todo en orden |
+| cornisas | 539/539 = 100 % |
+| steppers | 1332/1332 = 100 % |
+| senderos MEDIA / DIFÍCIL | 98,5 % / 97,0 % |
+| rebotes DIFÍCIL | 97,7 % |
+| saltos imposibles | 0 |
+| objetos (bidón y silla) | todo en orden |
+| cámara, personaje, gestos, instanciado | todo en orden |
+
+Las mismas cifras que antes del lote, sin una décima de diferencia.
+
+## Archivos tocados
+
+- `index.html` — sonido, ajustes de calidad, récords, torre del día, sRGB
+
+Nada más. `server.js`, `Dockerfile` y `package.json` siguen igual.
+
+---
+
 # Cambios — 23 de septiembre de 2026 (vigesimosegundo lote): el bidón y la silla en la torre
 
 Miguel: «en media y difícil añade también el barril y la silla que ya teníamos

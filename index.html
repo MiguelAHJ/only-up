@@ -248,6 +248,8 @@
   .dbtn .alt{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--ash)}
   .dbtn.on{border-color:var(--ember);background:rgba(255,107,44,.12)}
   .dbtn.on strong{color:var(--ember)}
+  .dbtn .marca{color:var(--signal)}
+  #diaWrap{display:flex;flex-direction:column}
 
   .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   @media (max-width:520px){.row2{grid-template-columns:1fr}}
@@ -259,6 +261,12 @@
   .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
     background:rgba(11,14,20,.9);backdrop-filter:blur(7px);padding:24px}
   .overlay[hidden]{display:none!important}
+  #ajustes,#ajustesPausa{display:flex;flex-direction:column;gap:10px}
+  .ajson{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:stretch}
+  @media (max-width:520px){.ajson{grid-template-columns:1fr}}
+  .ajvol{border:1px solid var(--edge);background:rgba(232,228,220,.03);padding:13px 14px;
+         display:flex;flex-direction:column;gap:9px;justify-content:center;margin:0}
+  .ajvol input[type=range]{width:100%;accent-color:var(--ember);background:transparent}
   .ovbox{width:min(460px,100%);display:flex;flex-direction:column;gap:16px}
   .ovbox h2{font-family:var(--display);font-size:clamp(28px,5vw,40px);margin:0;letter-spacing:-.02em}
   #fatal{padding:26px;font-family:var(--mono);font-size:13px;line-height:1.7;color:var(--danger)}
@@ -321,6 +329,7 @@
     <div class="rule"></div>
     <div class="kicker">DIFICULTAD</div>
     <div class="difs" id="difs"></div>
+    <div id="diaWrap"></div>
 
     <div class="rule"></div>
     <div class="kicker">ALCANCE DEL AVATAR</div>
@@ -351,6 +360,10 @@
     <div class="note">Todos entran con <b>el mismo código</b>. El primero fija la semilla y el servidor se la pasa a los demás, así subís <b>exactamente la misma torre</b>.</div>
 
     <div class="rule"></div>
+    <div class="kicker">AJUSTES</div>
+    <div id="ajustes"></div>
+
+    <div class="rule"></div>
     <div class="keys">
       <kbd><b>W A S D</b> MOVER</kbd><kbd><b>RATÓN</b> CÁMARA</kbd>
       <kbd><b>ESPACIO</b> SALTAR ×2</kbd><kbd><b>SHIFT</b> ANDAR (PRECISIÓN)</kbd>
@@ -367,6 +380,7 @@
       <div class="spec"><span class="k">ALTITUD</span><span class="v" id="pAlt">0</span></div>
       <div class="spec"><span class="k">RÉCORD</span><span class="v em" id="pBest">0</span></div>
       <div class="spec"><span class="k">TIEMPO</span><span class="v" id="pTime">00:00</span></div>
+      <div class="spec"><span class="k">TU MEJOR MARCA</span><span class="v" id="pMarca">—</span></div>
     </div>
     <div class="invite" id="pInvite" hidden>
       <div class="kicker">CÓDIGO DE SALA</div>
@@ -375,6 +389,8 @@
       <button class="btn" id="btnCopiar"><strong>COPIAR ENLACE</strong><small>Se lo pasas a tus amigos y entran de un clic.</small></button>
     </div>
     <div class="note" id="pNet"></div>
+    <div class="kicker">CALIDAD Y SONIDO</div>
+    <div id="ajustesPausa"></div>
     <button class="btn primary" id="btnResume"><strong>SEGUIR</strong><small>Vuelves donde estabas.</small></button>
     <button class="btn" id="btnReset"><strong>VOLVER AL SUELO</strong><small>Reinicia la subida.</small></button>
     <button class="btn" id="btnMenu"><strong>MENÚ</strong><small>Cambiar semilla o altura.</small></button>
@@ -390,6 +406,7 @@
       <div class="spec"><span class="k">TIEMPO</span><span class="v" id="wTime">00:00</span></div>
       <div class="spec"><span class="k">CAÍDA MÁX</span><span class="v" id="wWorst">0</span></div>
     </div>
+    <div class="note" id="wMarca"></div>
     <button class="btn primary" id="btnWin"><strong>OTRA TORRE</strong><small>Volver al menú.</small></button>
   </div>
 </div>
@@ -1665,7 +1682,37 @@ const SKY_F = `varying vec3 vD; uniform vec3 cZ,cM,cH,cA,cS; uniform vec3 sunDir
     col+=cS*(pow(sd,220.0)*0.75+pow(sd,11.0)*0.16);
     float band=smoothstep(0.47,0.50,h)*(1.0-smoothstep(0.50,0.545,h));
     col+=vec3(0.11,0.045,0.012)*band;
-    gl_FragColor=vec4(col,1.0);}`;
+    gl_FragColor=vec4(col,1.0);
+    /* El cielo es un ShaderMaterial propio, así que la conversión final a
+       sRGB no se la aplica nadie: hay que pedirla. Sin esta línea el cielo
+       se quedaría en lineal mientras el resto del juego pasa a sRGB, y se
+       vería un salto de color entre la torre y el fondo. */
+    #include <encodings_fragment>
+  }`;
+
+/* ─── COLOR EN sRGB ────────────────────────────────────────────────────
+   Hasta este lote el renderizador dibujaba con el encoding por defecto de
+   three, que es LINEAL. Eso quiere decir que un color escrito como #8A4A2B
+   —que es un número pensado para una pantalla, o sea sRGB— se enviaba tal
+   cual a la pantalla sin la curva que le corresponde. El resultado: todo
+   el juego se veía más apagado y con menos contraste de lo que pedía su
+   propia paleta, y cada textura que llegaba marcada como sRGB (las del
+   bidón, las de la silla, las del robot) había que ir desactivándola a
+   mano para que no desentonara. Hay tres apaños en el archivo que existen
+   sólo por esto.
+
+   Ahora el renderizador sale en sRGB y la tubería es la de siempre en
+   three: TODO lo que entra se convierte a lineal, se ilumina en lineal, y
+   se convierte a sRGB una sola vez al escribir el píxel.
+
+   La regla, que no tiene excepciones:
+     · un color escrito a mano (paleta, luces, cielo, niebla) es sRGB y
+       hay que pasarlo a lineal con convertSRGBToLinear()
+     · una textura de COLOR se marca sRGBEncoding (las de normales y
+       rugosidad NO: esas ya son datos lineales y convertirlas las rompe)
+     · los colores que vienen de un glTF ya son lineales por especificación
+       y no se tocan — por eso los tres apaños desaparecen                */
+const COL = hex => new THREE.Color(hex).convertSRGBToLinear();
 
 const MATS = {};
 const W = { renderer:null, scene:null, camera:null, sky:null, clouds:[], player:null, shadow:null, group:null };
@@ -1680,7 +1727,9 @@ function cloudTexture(){
     gr.addColorStop(0,"rgba(196,166,190,"+a+")"); gr.addColorStop(1,"rgba(196,166,190,0)");
     g.fillStyle=gr; g.beginPath(); g.arc(x,y,r,0,6.2832); g.fill();
   }
-  const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; return t;
+  const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping;
+  t.encoding=THREE.sRGBEncoding;          // es una textura de COLOR
+  return t;
 }
 function concreteTexture(){
   const c=document.createElement("canvas"); c.width=c.height=256;
@@ -1691,25 +1740,32 @@ function concreteTexture(){
   g.globalAlpha=0.07; g.strokeStyle="#000";
   for(let i=0;i<26;i++){ g.beginPath(); g.moveTo(Math.random()*256,Math.random()*256);
     g.lineTo(Math.random()*256,Math.random()*256); g.lineWidth=Math.random()*2.2; g.stroke(); }
-  const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; return t;
+  const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping;
+  t.encoding=THREE.sRGBEncoding;          // es una textura de COLOR
+  return t;
 }
 
 function initWorld(){
   const host=document.getElementById("scene");
-  W.renderer=new THREE.WebGLRenderer({antialias:true, powerPreference:"high-performance"});
-  W.renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  /* El suavizado se decide AQUÍ y ya no se puede cambiar: es una opción
+     del constructor. Por eso los ajustes lo aplican al recargar. */
+  const cal0 = CALIDADES[Ajustes.calidad] || CALIDADES.alta;
+  W.renderer=new THREE.WebGLRenderer({antialias:cal0.suave, powerPreference:"high-performance"});
+  W.renderer.setPixelRatio(Math.min(devicePixelRatio,2) * cal0.escala);
+  W.renderer.outputEncoding = THREE.sRGBEncoding;
   W.renderer.setSize(innerWidth,innerHeight);
   host.appendChild(W.renderer.domElement);
 
   W.scene=new THREE.Scene();
   W.scene.fog=new THREE.FogExp2(0x30243E,0.0034);
+  W.scene.fog.color.copy(COL(0x30243E));
   W.camera=new THREE.PerspectiveCamera(74, innerWidth/innerHeight, 0.1, 3000);
 
   W.sky=new THREE.Mesh(new THREE.SphereGeometry(1400,32,20), new THREE.ShaderMaterial({
     vertexShader:SKY_V, fragmentShader:SKY_F, side:THREE.BackSide, depthWrite:false,
-    uniforms:{ cZ:{value:new THREE.Color(0x0D1230)}, cM:{value:new THREE.Color(0x4A3560)},
-      cH:{value:new THREE.Color(0xE07A3C)}, cA:{value:new THREE.Color(0x140E20)},
-      cS:{value:new THREE.Color(0xFFB36B)}, sunDir:{value:new THREE.Vector3(0.55,0.06,-0.83)} }
+    uniforms:{ cZ:{value:COL(0x0D1230)}, cM:{value:COL(0x4A3560)},
+      cH:{value:COL(0xE07A3C)}, cA:{value:COL(0x140E20)},
+      cS:{value:COL(0xFFB36B)}, sunDir:{value:new THREE.Vector3(0.55,0.06,-0.83)} }
   }));
   W.scene.add(W.sky);
 
@@ -1720,43 +1776,49 @@ function initWorld(){
   W.sun  = new THREE.DirectionalLight(0xFFA062,0.95); W.sun.position.set(60,22,-90); W.scene.add(W.sun);
   W.fill = new THREE.DirectionalLight(0x4E6AAE,0.55); W.fill.position.set(-50,40,60); W.scene.add(W.fill);
   W.amb  = new THREE.AmbientLight(0x38304E,0.55); W.scene.add(W.amb);
+  /* Estos cuatro los reescribe aplicarCielo en el primer fotograma, pero
+     se dejan correctos igualmente: un fotograma con las luces mal es un
+     destello que se ve. */
+  W.hemi.color.copy(COL(0xC8B6D8)); W.hemi.groundColor.copy(COL(0x181C28));
+  W.sun.color.copy(COL(0xFFA062)); W.fill.color.copy(COL(0x4E6AAE));
+  W.amb.color.copy(COL(0x38304E));
 
   const ct=cloudTexture();
   [{y:-40,s:900,o:0.46},{y:-85,s:1300,o:0.32},{y:-150,s:1900,o:0.22}].forEach((L,i)=>{
     const m=new THREE.Mesh(new THREE.PlaneGeometry(L.s,L.s),
       new THREE.MeshBasicMaterial({map:ct,transparent:true,opacity:L.o,depthWrite:false,fog:false}));
     m.rotation.x=-Math.PI/2; m.position.y=L.y; m.userData.spin=0.0004/(i+1);
-    m.userData.op0=L.o;
+    m.userData.op0=L.o*NUBES_SRGB;
     W.scene.add(m); W.clouds.push(m);
   });
 
   const tex=concreteTexture();
   const mk=(hex,rough,metal,useTex)=>new THREE.MeshStandardMaterial({
-    color:hex, map:useTex?tex:null, roughness:rough, metalness:metal });
+    color:COL(hex), map:useTex?tex:null, roughness:rough, metalness:metal });
   MATS.oxido    = mk(0x8A4A2B,0.85,0.35,true);
   MATS.pintado  = mk(0x3E5A6E,0.55,0.55,true);
   MATS.galv     = mk(0x9AA0A6,0.40,0.80,false);
   MATS.hormigon = mk(0x7D7A72,0.95,0.02,true);
   MATS.oscuro   = mk(0x2E3238,0.70,0.50,false);
-  MATS.peligro  = new THREE.MeshBasicMaterial({color:0xE8B23A});
+  MATS.peligro  = new THREE.MeshBasicMaterial({color:COL(0xE8B23A)});
 
   // avatar
   W.player=new THREE.Group();
   const body=new THREE.Mesh(new THREE.CylinderGeometry(0.32,0.28,1.05,10),
-    new THREE.MeshStandardMaterial({color:0xFF6B2C,roughness:0.55}));
+    new THREE.MeshStandardMaterial({color:COL(0xFF6B2C),roughness:0.55}));
   body.position.y=0.6;
   const head=new THREE.Mesh(new THREE.SphereGeometry(0.26,14,10),
-    new THREE.MeshStandardMaterial({color:0xE8E4DC,roughness:0.7}));
+    new THREE.MeshStandardMaterial({color:COL(0xE8E4DC),roughness:0.7}));
   head.position.y=1.36;
   const visor=new THREE.Mesh(new THREE.BoxGeometry(0.4,0.11,0.17),
-    new THREE.MeshStandardMaterial({color:0x4FD1C5,emissive:0x4FD1C5,emissiveIntensity:1.5}));
+    new THREE.MeshStandardMaterial({color:COL(0x4FD1C5),emissive:COL(0x4FD1C5),emissiveIntensity:1.5}));
   visor.position.set(0,1.38,-0.19);
   W.player.add(body,head,visor);
   W.playerBody=body; W.playerVisor=visor;
   W.scene.add(W.player);
 
   W.shadow=new THREE.Mesh(new THREE.RingGeometry(0.06,0.5,28),
-    new THREE.MeshBasicMaterial({color:0x0B0E14,transparent:true,opacity:0.5,depthWrite:false,fog:false}));
+    new THREE.MeshBasicMaterial({color:COL(0x0B0E14),transparent:true,opacity:0.5,depthWrite:false,fog:false}));
   W.shadow.rotation.x=-Math.PI/2; W.scene.add(W.shadow);
 
   /* El lienzo se mide del CONTENEDOR, nunca de innerWidth/innerHeight.
@@ -1917,6 +1979,27 @@ const FASES = [
     relC:0x4A5EA8, relI:0.50, ambC:0x3E4A80, ambI:0.85, nubes:0.55 },
 ];
 
+/* REAJUSTE POR EL PASO A sRGB.
+   Con el renderizador en sRGB la imagen salía más clara. Para saber QUÉ
+   había que bajar se midió la luminancia media de tres encuadres fijos,
+   por zonas (cielo, media altura y suelo), contra las mismas capturas de
+   antes del cambio. Tres hipótesis, dos descartadas por la medida:
+
+     · «sobra luz» → bajé las cuatro luces un 40%: el error medio pasó de
+       5.4% a 5.2%. Nada. Las zonas que más habían cambiado no eran
+       geometría iluminada.
+     · «es la niebla, que ahora se mezcla en lineal» → barrí la densidad
+       de 1.0 a 0.5: 0.3728, 0.3720, 0.3724, 0.3723. Idéntico. Tampoco.
+     · «son las NUBES» → sí. Tres planos grandes y transparentes que
+       cubren toda la parte baja del encuadre. Bajando su opacidad a la
+       mitad, el error medio cae de 7.5% a 5.4% y la peor zona de +24% a
+       +12%.
+
+   Los dos mandos que no movían nada no se quedan: un ajuste que no cambia
+   una medida es decoración. Queda uno, y el 12% que sigue arriba es el
+   cambio real de tubería, no un fallo que tapar. */
+let NUBES_SRGB = 0.50;
+
 const _cA1=new THREE.Color(), _cB1=new THREE.Color();
 let _cicloP = -1;
 function aplicarCielo(p){
@@ -1930,7 +2013,12 @@ function aplicarCielo(p){
   const t = clamp((p - A.p) / (B.p - A.p), 0, 1);
   // suavizado: las transiciones entre fases no deben tener esquinas
   const k = t*t*(3-2*t);
-  const col = (u, a, b) => { _cA1.setHex(a); _cB1.setHex(b); u.value.copy(_cA1).lerp(_cB1, k); };
+  /* La interpolación se hace en LINEAL, que es donde mezclar luz tiene
+     sentido físico; por eso se convierte antes del lerp y no después. */
+  const col = (u, a, b) => {
+    _cA1.setHex(a).convertSRGBToLinear(); _cB1.setHex(b).convertSRGBToLinear();
+    u.value.copy(_cA1).lerp(_cB1, k);
+  };
   const num = (a, b) => a + (b-a)*k;
 
   const U = W.sky.material.uniforms;
@@ -1938,21 +2026,21 @@ function aplicarCielo(p){
   col(U.cA, A.cA, B.cA);  col(U.cS, A.cS, B.cS);
   U.sunDir.value.set(num(A.sol[0],B.sol[0]), num(A.sol[1],B.sol[1]), num(A.sol[2],B.sol[2])).normalize();
 
-  _cA1.setHex(A.niebla); _cB1.setHex(B.niebla);
+  _cA1.setHex(A.niebla).convertSRGBToLinear(); _cB1.setHex(B.niebla).convertSRGBToLinear();
   W.scene.fog.color.copy(_cA1).lerp(_cB1, k);
   W.scene.fog.density = num(A.densidad, B.densidad);
 
-  _cA1.setHex(A.hemiC); _cB1.setHex(B.hemiC); W.hemi.color.copy(_cA1).lerp(_cB1,k);
-  _cA1.setHex(A.hemiS); _cB1.setHex(B.hemiS); W.hemi.groundColor.copy(_cA1).lerp(_cB1,k);
+  _cA1.setHex(A.hemiC).convertSRGBToLinear(); _cB1.setHex(B.hemiC).convertSRGBToLinear(); W.hemi.color.copy(_cA1).lerp(_cB1,k);
+  _cA1.setHex(A.hemiS).convertSRGBToLinear(); _cB1.setHex(B.hemiS).convertSRGBToLinear(); W.hemi.groundColor.copy(_cA1).lerp(_cB1,k);
   W.hemi.intensity = num(A.hemiI, B.hemiI);
 
-  _cA1.setHex(A.solC); _cB1.setHex(B.solC); W.sun.color.copy(_cA1).lerp(_cB1,k);
+  _cA1.setHex(A.solC).convertSRGBToLinear(); _cB1.setHex(B.solC).convertSRGBToLinear(); W.sun.color.copy(_cA1).lerp(_cB1,k);
   W.sun.intensity = num(A.solI, B.solI);
   W.sun.position.set(num(A.solPos[0],B.solPos[0]), num(A.solPos[1],B.solPos[1]), num(A.solPos[2],B.solPos[2]));
 
-  _cA1.setHex(A.relC); _cB1.setHex(B.relC); W.fill.color.copy(_cA1).lerp(_cB1,k);
+  _cA1.setHex(A.relC).convertSRGBToLinear(); _cB1.setHex(B.relC).convertSRGBToLinear(); W.fill.color.copy(_cA1).lerp(_cB1,k);
   W.fill.intensity = num(A.relI, B.relI);
-  _cA1.setHex(A.ambC); _cB1.setHex(B.ambC); W.amb.color.copy(_cA1).lerp(_cB1,k);
+  _cA1.setHex(A.ambC).convertSRGBToLinear(); _cB1.setHex(B.ambC).convertSRGBToLinear(); W.amb.color.copy(_cA1).lerp(_cB1,k);
   W.amb.intensity = num(A.ambI, B.ambI);
 
   const fn = num(A.nubes, B.nubes);
@@ -1974,6 +2062,447 @@ function faseActual(){
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   4c · SONIDO — sintetizado, cero archivos
+
+   Hasta hoy el juego se jugaba en silencio absoluto: ni una sola
+   referencia a audio en todo el archivo. Y un juego de escalar vive de la
+   tensión, que es sonido: el viento que arrecia según subes, el golpe seco
+   al aterrizar, ese medio segundo en que ya sabes que te caíste.
+
+   Todo se genera aquí con la Web Audio API — ruido filtrado para el viento
+   y los pasos, osciladores con envolvente para los golpes. No se descarga
+   ni un byte, así que no hay licencias que revisar ni tiempo de carga, y
+   cada sonido se afina cambiando un número.
+
+   Tres cosas que este módulo NO puede olvidar:
+     · El navegador no deja crear audio sin un gesto del jugador, así que
+       el contexto nace en el primer clic o tecla, no al cargar.
+     · Si el audio falla (navegador raro, permisos, contexto agotado), el
+       juego tiene que seguir jugándose igual. Todo va envuelto.
+     · El bucle llama a esto 60 veces por segundo: el viento es un único
+       grafo permanente que solo cambia de valor, no se recrea nunca.
+   ═══════════════════════════════════════════════════════════════ */
+const SND_CLAVE = "tv:sonido";
+
+const Snd = {
+  ctx:null, master:null, listo:false, fallo:false,
+  mudo:false, vol:0.7,
+  _ruido:null, _vGain:null, _vFiltro:null,
+  _dist:0,                  // distancia recorrida desde el último paso
+  _n:{},                    // cuántas veces sonó cada cosa (lo miran las pruebas)
+
+  /* Se llama en el primer gesto del jugador. Repetirla no cuesta nada. */
+  arrancar(){
+    if (this.ctx || this.fallo) return;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC){ this.fallo = true; return; }
+      const ctx = this.ctx = new AC();
+      this.master = ctx.createGain();
+      this.master.gain.value = this.mudo ? 0 : this.vol;
+      this.master.connect(ctx.destination);
+
+      /* Dos segundos de ruido blanco, reutilizados por el viento y por
+         todos los golpes. Generarlo una vez y reproducirlo a trozos es
+         mucho más barato que crear ruido en cada disparo. */
+      const n = Math.floor(ctx.sampleRate * 2);
+      const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) d[i] = Math.random()*2 - 1;
+      this._ruido = buf;
+
+      // El viento: una sola fuente en bucle, para siempre.
+      const src = ctx.createBufferSource();
+      src.buffer = buf; src.loop = true;
+      const f = ctx.createBiquadFilter();
+      f.type = "bandpass"; f.frequency.value = 400; f.Q.value = 0.7;
+      const g = ctx.createGain(); g.gain.value = 0;
+      src.connect(f); f.connect(g); g.connect(this.master);
+      src.start();
+      this._vFiltro = f; this._vGain = g;
+
+      this.listo = true;
+    } catch(e){ this.fallo = true; }
+  },
+
+  /* El contexto se suspende solo si la pestaña pierde el foco. */
+  despertar(){
+    if (this.ctx && this.ctx.state === "suspended"){
+      try { this.ctx.resume(); } catch(e){}
+    }
+  },
+
+  guardar(){
+    try { localStorage.setItem(SND_CLAVE,
+      JSON.stringify({ mudo:this.mudo, vol:+this.vol.toFixed(2) })); } catch(e){}
+  },
+  cargar(){
+    try {
+      const j = JSON.parse(localStorage.getItem(SND_CLAVE) || "{}");
+      if (typeof j.mudo === "boolean") this.mudo = j.mudo;
+      if (typeof j.vol === "number") this.vol = clamp(j.vol, 0, 1);
+    } catch(e){}
+  },
+  ponerVol(v){
+    this.vol = clamp(v, 0, 1);
+    if (this.master) this.master.gain.value = this.mudo ? 0 : this.vol;
+    this.guardar();
+  },
+  silenciar(si){
+    this.mudo = (si === undefined) ? !this.mudo : !!si;
+    if (this.master) this.master.gain.value = this.mudo ? 0 : this.vol;
+    this.guardar();
+    return this.mudo;
+  },
+
+  /* Envolvente exponencial. Se usa exponential y no linear porque el oído
+     percibe el volumen en escala logarítmica: una rampa lineal se oye como
+     un corte brusco al final. El 0.0001 es porque exponentialRamp no
+     admite el cero. */
+  _env(g, pico, ataque, caida, t0){
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, pico), t0 + ataque);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + ataque + caida);
+  },
+
+  _osc(tipo, f0, f1, dur, pico, t0){
+    const ctx = this.ctx;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = tipo;
+    o.frequency.setValueAtTime(f0, t0);
+    if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t0 + dur);
+    this._env(g, pico, Math.min(0.012, dur*0.2), dur, t0);
+    o.connect(g); g.connect(this.master);
+    o.start(t0); o.stop(t0 + dur + 0.05);
+  },
+
+  _burst(tipoFiltro, freq, Q, dur, pico, t0){
+    const ctx = this.ctx;
+    const s = ctx.createBufferSource();
+    s.buffer = this._ruido;
+    s.loop = true;
+    s.playbackRate.value = 0.8 + Math.random()*0.4;
+    const f = ctx.createBiquadFilter();
+    f.type = tipoFiltro; f.frequency.value = freq; if (Q) f.Q.value = Q;
+    const g = ctx.createGain();
+    this._env(g, pico, 0.006, dur, t0);
+    s.connect(f); f.connect(g); g.connect(this.master);
+    // arranca en un punto al azar del buffer: dos pasos seguidos no suenan idénticos
+    s.start(t0, Math.random()*1.5);
+    s.stop(t0 + dur + 0.05);
+  },
+
+  /* Un golpe puntual. `fuerza` va de 0 a 1 donde tiene sentido. */
+  golpe(tipo, fuerza){
+    this._n[tipo] = (this._n[tipo] || 0) + 1;    // se cuenta aunque no suene
+    if (!this.listo || this.mudo) return;
+    let t;
+    try { t = this.ctx.currentTime; } catch(e){ return; }
+    const F = clamp(fuerza === undefined ? 1 : fuerza, 0, 1);
+    try {
+      switch (tipo){
+        case "salto":
+          this._osc("triangle", 230, 430, 0.13, 0.20, t);
+          this._burst("highpass", 900, 0.7, 0.05, 0.05, t);
+          break;
+        case "doble":
+          /* Más agudo que el primero a propósito: el doble salto es la
+             jugada que hay que reconocer sin mirar el HUD. */
+          this._osc("triangle", 360, 690, 0.12, 0.18, t);
+          this._osc("sine", 720, 980, 0.09, 0.07, t + 0.01);
+          break;
+        case "pisar":
+          // el golpe pesa según la velocidad con la que llegas
+          this._osc("sine", 90, 55, 0.13, 0.05 + F*0.30, t);
+          this._burst("lowpass", 420 + F*700, 0.9, 0.09 + F*0.07, 0.04 + F*0.16, t);
+          break;
+        case "paso":
+          this._burst("bandpass", 1100 + Math.random()*500, 1.4, 0.045, 0.035, t);
+          break;
+        case "caida":
+          /* La caída larga. Barrido hacia abajo: es el sonido de que se
+             acabó, y suena DESPUÉS de que el viento ya te haya avisado. */
+          this._osc("sawtooth", 320, 70, 0.55, 0.16, t);
+          this._burst("lowpass", 700, 0.8, 0.5, 0.10, t);
+          break;
+        case "cima": {
+          const notas = [523.25, 659.25, 783.99, 1046.50];
+          notas.forEach((f, i) => this._osc("triangle", f, f, 0.30, 0.16, t + i*0.13));
+          break;
+        }
+      }
+    } catch(e){}
+  },
+
+  /* Pasos por DISTANCIA recorrida, no por tiempo: así andar da pasos
+     lentos y correr los da rápidos sin ninguna cuenta aparte, y el ritmo
+     cuadra solo con la velocidad real. */
+  andar(metros){
+    this._dist += metros;
+    if (this._dist >= 2.0){ this._dist = 0; this.golpe("paso"); }
+  },
+  pararPasos(){ this._dist = 0; },
+
+  /* CUÁNTO viento toca, separado de APLICARLO.
+     Están partidos por una razón práctica: setTargetAtTime no cambia el
+     valor al momento, sino que lo persigue en el hilo de audio, así que
+     leer gain.value justo después devuelve el valor viejo. Mi primera
+     prueba hacía eso y daba 0.005 para todas las alturas — medía la
+     interpolación, no la regla. Con la regla en una función aparte se
+     puede comprobar lo que de verdad importa. */
+  calcViento(altura, techo, vy, activo){
+    if (!activo) return { g:0, f:400 };
+    const h = clamp(altura / Math.max(1, techo), 0, 1);
+    // arrecia con la altura...
+    let g = 0.015 + h*0.10;
+    let f = 300 + h*260;
+    // ...y sobre todo con la caída, que es donde aprieta el estómago
+    const cae = clamp((-vy - 7) / 38, 0, 1);
+    g += cae*0.26;
+    f += cae*900;
+    return { g, f };
+  },
+
+  /* El viento. Se llama en cada fotograma; no crea nada, sólo empuja dos
+     valores con setTargetAtTime, que interpola suave en el hilo de audio
+     y no produce chasquidos. */
+  viento(altura, techo, vy, activo){
+    if (!this.listo) return;
+    const v = this.calcViento(altura, techo, vy, activo);
+    this._ultViento = v;                 // lo último que se pidió
+    try {
+      const t = this.ctx.currentTime;
+      this._vGain.gain.setTargetAtTime(v.g, t, 0.28);
+      this._vFiltro.frequency.setTargetAtTime(v.f, t, 0.18);
+    } catch(e){}
+  }
+};
+Snd.cargar();
+
+/* ═══════════════════════════════════════════════════════════════
+   4d · AJUSTES DE CALIDAD
+
+   Tu amigo de España se queja de tirones y en el lote 21 le pusimos un
+   medidor de fps en el HUD. O sea que le dimos el diagnóstico y ninguna
+   cura: no había un solo ajuste que pudiera tocar. Esto es la cura.
+
+   Qué se toca y por qué, en orden de lo que más pesa:
+
+     · ESCALA DE RESOLUCIÓN. Es la palanca grande, con diferencia. Dibujar
+       al 60% es dibujar un 36% de los píxeles. Todo lo demás son migajas
+       al lado de esto.
+     · SUAVIZADO DE BORDES (antialias). Caro en gráficas integradas, pero
+       es una opción del CONSTRUCTOR del renderizador: no se puede cambiar
+       sin rehacerlo entero, y rehacerlo entero se lleva por delante el
+       bloqueo del puntero y los manejadores táctiles. Así que se lee al
+       arrancar y se aplica al recargar. La interfaz lo dice, no lo esconde.
+     · NUBES. Tres planos grandes, transparentes y superpuestos: relleno
+       puro. En una integrada el relleno es justo lo que duele.
+     · DISTANCIA DEL ROBOT. A cuántos metros los demás jugadores pasan de
+       robot animado a cilindro. Solo importa con gente en la sala, pero
+       ahí importa mucho: cada robot son 19 llamadas de dibujo.
+
+   Lo que NO se toca: la niebla ni el plano lejano. Cambiarlos ahorra poco
+   —la torre es alta y estrecha, no hay mundo lejano que recortar— y en
+   cambio cambian el aspecto del juego. Un ajuste de rendimiento no debería
+   cambiar el arte.
+   ═══════════════════════════════════════════════════════════════ */
+const CAL_CLAVE = "tv:calidad";
+const CALIDADES = {
+  baja:  { nombre:"BAJA",  lema:"para máquinas justas",   escala:0.60, suave:false, nubes:1, robot:26 },
+  media: { nombre:"MEDIA", lema:"el término medio",        escala:0.85, suave:true,  nubes:2, robot:42 },
+  alta:  { nombre:"ALTA",  lema:"todo encendido",          escala:1.00, suave:true,  nubes:3, robot:55 }
+};
+
+const Ajustes = {
+  calidad:"alta",
+  elegida:false,        // ¿lo decidió el jugador, o seguimos con lo puesto?
+  detectada:null,       // {nivel, fps} de la medición de arranque
+  _t0:0,
+
+  cargar(){
+    try {
+      const j = JSON.parse(localStorage.getItem(CAL_CLAVE) || "{}");
+      if (j.calidad && CALIDADES[j.calidad]){ this.calidad = j.calidad; this.elegida = true; }
+    } catch(e){}
+  },
+  guardar(){
+    try { localStorage.setItem(CAL_CLAVE, JSON.stringify({ calidad:this.calidad })); } catch(e){}
+  },
+
+  /* Lo que se puede cambiar en caliente. El suavizado no está aquí: ver
+     el comentario de arriba. */
+  aplicar(){
+    const c = CALIDADES[this.calidad] || CALIDADES.alta;
+    try {
+      if (W.renderer) W.renderer.setPixelRatio(Math.min(devicePixelRatio, 2) * c.escala);
+    } catch(e){}
+    if (W.clouds) W.clouds.forEach((m, i) => { m.visible = i < c.nubes; });
+    DIST_ROBOT = c.robot;
+    DIST_ROBOT_SALE = c.robot + 9;      // la misma histéresis de siempre
+  },
+
+  poner(id, porElJugador){
+    if (!CALIDADES[id]) return;
+    this.calidad = id;
+    if (porElJugador){ this.elegida = true; this.guardar(); }
+    this.aplicar();
+  },
+
+  /* Mide de verdad antes de proponer nada. Tres segundos con el menú
+     girando ya dan una media estable, y el menú dibuja la torre entera,
+     así que no es una medida de laboratorio: es la carga real.
+     Si el jugador ya eligió alguna vez, aquí no se toca nada: su decisión
+     manda siempre, aunque la máquina vaya mal ese día. */
+  vigilar(now){
+    if (this.elegida || this.detectada) return;
+    if (!this._t0){ this._t0 = now; return; }
+    if (now - this._t0 < 3000) return;
+    const fps = Perf.fps;
+    const nivel = fps >= 55 ? "alta" : fps >= 34 ? "media" : "baja";
+    this.detectada = { nivel, fps:Math.round(fps) };
+    if (nivel !== this.calidad) this.poner(nivel, false);
+    pintarAjustes();
+  }
+};
+Ajustes.cargar();
+
+/* Aviso al silenciar con la M, que se pulsa jugando y sin mirar el menú. */
+function avisoSonido(){ avisoHUD(Snd.mudo ? "SONIDO APAGADO" : "SONIDO ENCENDIDO"); }
+
+/* Dibuja el bloque de ajustes. Vive en dos sitios —el menú y la pausa—
+   porque los tirones se sufren JUGANDO, y mandar al jugador al menú para
+   bajar la calidad es perder la partida que estaba jugando. */
+function pintarAjustes(){
+  for (const [id, mini] of [["ajustes", false], ["ajustesPausa", true]]){
+    const cont = document.getElementById(id);
+    if (!cont) continue;
+    const c = CALIDADES[Ajustes.calidad];
+    let h = '<div class="difs">';
+    for (const k of Object.keys(CALIDADES)){
+      const q = CALIDADES[k];
+      h += '<button class="dbtn' + (k === Ajustes.calidad ? " on" : "") + '" data-cal="' + k + '">' +
+           '<strong>' + q.nombre + '</strong>' +
+           (mini ? "" : '<small>' + q.lema + '</small>' +
+             '<span class="alt">' + Math.round(q.escala*100) + '% DE RESOLUCIÓN</span>') +
+           '</button>';
+    }
+    h += '</div>';
+
+    h += '<div class="ajson">' +
+         '<button class="dbtn' + (Snd.mudo ? "" : " on") + '" id="btnMudo' + (mini?"P":"") + '">' +
+         '<strong>' + (Snd.mudo ? "SONIDO APAGADO" : "SONIDO ENCENDIDO") + '</strong>' +
+         (mini ? "" : '<small>tecla M en cualquier momento</small>') + '</button>' +
+         '<label class="ajvol">VOLUMEN' +
+         '<input type="range" min="0" max="100" step="5" value="' + Math.round(Snd.vol*100) +
+         '" data-vol="1"></label></div>';
+
+    if (!mini){
+      let n = "";
+      if (Ajustes.detectada)
+        n = "Medido al arrancar: <b>" + Ajustes.detectada.fps + " fps</b>, así que se propuso <b>" +
+            CALIDADES[Ajustes.detectada.nivel].nombre + "</b>. Mandas tú: si lo cambias, se recuerda.";
+      else if (Ajustes.elegida)
+        n = "Calidad elegida por ti. No se toca sola.";
+      else
+        n = "Midiendo los fotogramas para proponerte un nivel…";
+      n += "<br>El suavizado de bordes (" + (c.suave ? "encendido" : "apagado") +
+           " en " + c.nombre + ") <b>se aplica al recargar la página</b>: " +
+           "es una opción con la que nace el renderizador y no se puede cambiar en caliente.";
+      h += '<div class="note">' + n + '</div>';
+    }
+    cont.innerHTML = h;
+
+    cont.querySelectorAll("[data-cal]").forEach(b =>
+      b.addEventListener("click", () => { Ajustes.poner(b.dataset.cal, true); pintarAjustes(); }));
+    const bm = cont.querySelector("[id^=btnMudo]");
+    if (bm) bm.addEventListener("click", () => { Snd.arrancar(); Snd.silenciar(); pintarAjustes(); });
+    const sl = cont.querySelector("[data-vol]");
+    if (sl) sl.addEventListener("input", () => {
+      Snd.arrancar();
+      if (Snd.mudo) Snd.silenciar(false);
+      Snd.ponerVol(+sl.value / 100);
+      pintarAjustes();
+    });
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   4e · RÉCORDS Y TORRE DEL DÍA
+
+   Hasta hoy, en localStorage sólo vivía el nombre del jugador. G.best se
+   ponía a cero en cada partida, así que quien llegaba a 1.400 m y cerraba
+   la pestaña no dejaba rastro: ni un número que superar al día siguiente.
+
+   Aquí se guardan la mejor altura y, si se llegó arriba, el mejor tiempo.
+   Una entrada por dificultad, y una aparte por cada torre del día.
+
+   LA TORRE DEL DÍA se apoya en lo mejor que tiene este proyecto: el
+   generador es determinista, así que una semilla derivada de la fecha
+   basta para que todo el mundo suba EXACTAMENTE la misma torre, sin
+   servidor, sin cuentas y sin base de datos.
+
+   La fecha se toma en UTC y no en la hora local, y esto no es un detalle:
+   con hora local, alguien en Caracas y alguien en Madrid estarían jugando
+   torres distintas durante seis horas cada día y comparando tiempos de dos
+   torres diferentes sin enterarse.
+   ═══════════════════════════════════════════════════════════════ */
+const MARCA_CLAVE = "tv:marcas";
+
+function fechaUTC(d){
+  const x = d || new Date();
+  const p = n => String(n).padStart(2, "0");
+  return x.getUTCFullYear() + p(x.getUTCMonth()+1) + p(x.getUTCDate());
+}
+function semillaDelDia(d){ return "DIA-" + fechaUTC(d); }
+
+const Marcas = {
+  datos:{},
+  cargar(){
+    try { this.datos = JSON.parse(localStorage.getItem(MARCA_CLAVE) || "{}") || {}; }
+    catch(e){ this.datos = {}; }
+  },
+  guardar(){
+    try { localStorage.setItem(MARCA_CLAVE, JSON.stringify(this.datos)); } catch(e){}
+  },
+  clave(dif, dia){
+    return dia ? "dia:" + fechaUTC() + ":" + dif : dif;
+  },
+  leer(dif, dia){ return this.datos[this.clave(dif, dia)] || null; },
+
+  /* Anota lo conseguido en la partida en curso. Devuelve true si algo
+     mejoró, que es lo que decide si se enseña el «¡RÉCORD!». */
+  anotar(){
+    if (!G.tower || G.best <= 0) return false;
+    const k = this.clave(G.dif, G.dia);
+    const m = this.datos[k] || { alt:0, t:0, fecha:"" };
+    let mejora = false;
+    if (G.best > m.alt + 0.05){ m.alt = +G.best.toFixed(1); m.fecha = fechaUTC(); mejora = true; }
+    /* El tiempo sólo cuenta si se llegó ARRIBA: un tiempo de una partida
+       que se quedó a medias no se puede comparar con nada. */
+    if (G.won && (!m.t || G.elapsed < m.t)){ m.t = +G.elapsed.toFixed(2); mejora = true; }
+    this.datos[k] = m;
+    if (mejora) this.guardar();
+    return mejora;
+  },
+
+  /* Se limpian las torres del día viejas: si no, la lista crece para
+     siempre en el navegador de quien juegue a diario. Se guardan 30. */
+  podar(){
+    const dias = Object.keys(this.datos).filter(k => k.startsWith("dia:")).sort();
+    if (dias.length <= 90) return;
+    for (const k of dias.slice(0, dias.length - 90)) delete this.datos[k];
+    this.guardar();
+  }
+};
+Marcas.cargar(); Marcas.podar();
+
+function fmtMarca(m){
+  if (!m || !m.alt) return "SIN RÉCORD";
+  return Math.round(m.alt) + " m" + (m.t ? " · " + fmt(m.t) : "");
+}
+
+/* ═══════════════════════════════════════════════════════════════
    5 · Estado y física
    ═══════════════════════════════════════════════════════════════ */
 const G = {
@@ -1986,6 +2515,7 @@ const G = {
   keys:Object.create(null),
   stick:null,             // {x,z,mag} mientras haya un dedo en el joystick
   lab:false,              // dentro del laboratorio oculto
+  dia:false,              // ¿es la torre del día? (semilla derivada de la fecha)
   ultimaEntrada:0,        // última vez que tocaste teclado o ratón (ver siesta)
   // cámara amortiguada — desacoplada de la posición física
   camX:0, camY:0, camZ:0, camDist:6.2,
@@ -2068,7 +2598,12 @@ function physicsStep(h){
 
   if (G.grounded){
     G.jumpsLeft = AV.maxJumpCount;
+    /* Pasos por distancia: el ritmo sale solo de la velocidad real. */
+    Snd.andar(Math.hypot(G.vx, G.vz) * h);
     if (!eraSuelo){
+      /* El golpe pesa según con qué velocidad llegabas. vyAntes es la de
+         ANTES de resolver la colisión: después ya está puesta a cero. */
+      Snd.golpe("pisar", clamp(-vyAntes / 26, 0, 1));
       if (G.apex - G.py > 6){
         const caida = G.apex - G.py;
         G.worst = Math.max(G.worst, caida);
@@ -2076,7 +2611,7 @@ function physicsStep(h){
       }
       G.apex = G.py;
     }
-  }
+  } else Snd.pararPasos();
   if (G.py > G.apex) G.apex = G.py;
   if (G.py > G.best) G.best = G.py;
 
@@ -2086,6 +2621,8 @@ function physicsStep(h){
   if (G.py < -78){
     const perdido = G.apex - 1;
     if (perdido>6){ G.worst=Math.max(G.worst,perdido); showDrop(perdido); }
+    Snd.golpe("caida");
+    Marcas.anotar();      // lo subido cuenta aunque te acabes de caer
     respawn();
   }
 
@@ -2186,6 +2723,8 @@ function resolveCollisions(){
 function doJump(){
   if (G.jumpsLeft<=0) return false;
   G.vy = V0;
+  /* Antes de decrementar: si aún tenías todos, este es el primer salto. */
+  Snd.golpe(G.jumpsLeft >= AV.maxJumpCount ? "salto" : "doble");
   G.jumpsLeft--;
   G.grounded=false; G.coyote=0; G.buffer=0;
   return true;
@@ -2292,11 +2831,15 @@ const $ = id=>document.getElementById(id);
 function fmt(s){ const m=Math.floor(s/60),r=Math.floor(s%60);
   return String(m).padStart(2,"0")+":"+String(r).padStart(2,"0"); }
 let dropT=null;
-function showDrop(m){
-  const el=$("drop"); el.textContent="−"+Math.round(m)+" m";
+/* Aviso grande en el centro. Lo comparten la caída y el silenciador: si
+   los dos tuvieran su propio temporizador se pisarían y uno se quedaría
+   colgado en pantalla. */
+function avisoHUD(txt){
+  const el=$("drop"); el.textContent=txt;
   el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
   clearTimeout(dropT); dropT=setTimeout(()=>el.classList.remove("flash"),2000);
 }
+function showDrop(m){ avisoHUD("−"+Math.round(m)+" m"); }
 function buildTicks(){
   const t=$("ticks"); t.innerHTML="";
   const step = G.altura>600?100:50;
@@ -2733,12 +3276,12 @@ function etiqueta(texto, color){
   return s;
 }
 function avatar(color){
-  const g=new THREE.Group(), col=new THREE.Color(color);
+  const g=new THREE.Group(), col=COL(color);
   const body=new THREE.Mesh(new THREE.CylinderGeometry(0.32,0.28,1.05,10),
     new THREE.MeshStandardMaterial({color:col,roughness:0.55}));
   body.position.y=0.6;
   const head=new THREE.Mesh(new THREE.SphereGeometry(0.26,14,10),
-    new THREE.MeshStandardMaterial({color:0xE8E4DC,roughness:0.7}));
+    new THREE.MeshStandardMaterial({color:COL(0xE8E4DC),roughness:0.7}));
   head.position.y=1.36;
   const visor=new THREE.Mesh(new THREE.BoxGeometry(0.4,0.11,0.17),
     new THREE.MeshStandardMaterial({color:col,emissive:col,emissiveIntensity:1.5}));
@@ -2855,6 +3398,7 @@ function loop(now){
   }
   let dt=(now-last)/1000; last=now;
   Perf.muestra(now, dt*1000);
+  Ajustes.vigilar(now);
   aplicarCielo(progresoCielo());
   if (dt>0.1) dt=0.1;
 
@@ -2882,6 +3426,10 @@ function loop(now){
   // también en pausa, que es justo cuando te echan por estar AFK.
   pintarRed();
 
+  /* El viento sopla SOLO jugando: en el menú y en pausa se apaga solo,
+     porque setTargetAtTime interpola y no hay corte brusco. */
+  Snd.viento(G.py, G.altura, G.vy, G.mode === "play");
+
   if (G.mode==="play"||G.mode==="pause"||G.mode==="win"){ syncRemotos(dt); updateCamera(dt); }
   else {
     const a=now*0.00007;
@@ -2903,7 +3451,8 @@ function pintarDifs(){
       const d = DIFS[id];
       const b = document.createElement("button");
       b.className = "dbtn"; b.dataset.d = id;
-      b.innerHTML = "<strong></strong><small></small><span class='alt'></span>";
+      b.innerHTML = "<strong></strong><small></small><span class='alt'></span>" +
+                    "<span class='alt marca'></span>";
       b.children[0].textContent = d.nombre;
       b.children[1].textContent = d.lema;
       b.children[2].textContent = d.altura + " M POR DEFECTO";
@@ -2911,13 +3460,49 @@ function pintarDifs(){
       cont.appendChild(b);
     }
   }
-  [...cont.children].forEach(b=>b.classList.toggle("on", b.dataset.d===G.dif));
+  [...cont.children].forEach(b=>{
+    b.classList.toggle("on", b.dataset.d===G.dif && !G.dia);
+    // el récord de cada dificultad, en su propio botón
+    b.querySelector(".marca").textContent = "TU RÉCORD: " + fmtMarca(Marcas.leer(b.dataset.d, false));
+  });
+  pintarDia();
+}
+
+/* La torre del día: un botón aparte, con su semilla y su récord. */
+function pintarDia(){
+  const cont = $("diaWrap");
+  if (!cont) return;
+  const m = Marcas.leer(G.dif, true);
+  const f = fechaUTC();
+  cont.innerHTML =
+    '<button class="dbtn' + (G.dia ? " on" : "") + '" id="btnDia">' +
+    '<strong>TORRE DEL DÍA</strong>' +
+    '<small>La misma torre para todo el mundo hoy, en ' + DIFS[G.dif].nombre +
+    '. Cambia cada día a medianoche UTC.</small>' +
+    '<span class="alt">' + f.slice(6,8) + "/" + f.slice(4,6) + "/" + f.slice(0,4) +
+    ' · SEMILLA ' + semillaDelDia() + '</span>' +
+    '<span class="alt marca">HOY: ' + fmtMarca(m) + '</span>' +
+    '</button>';
+  $("btnDia").addEventListener("click", ()=>alternarDia());
+}
+
+function alternarDia(){
+  G.dia = !G.dia;
+  if (G.dia){
+    $("seed").value = semillaDelDia();
+    $("height").value = DIFS[G.dif].altura;   // todos la misma altura, o no se compara
+  }
+  $("seed").disabled = G.dia;
+  regenerate();
 }
 function elegirDif(id){
   id = difValida(id);
-  if (id === G.dif) return;
+  if (id === G.dif && !G.dia) return;
   G.dif = id;
   $("height").value = DIFS[id].altura;   // la altura por defecto va con ella
+  /* Tocar una dificultad te saca de la torre del día: son dos formas de
+     jugar distintas y mezclarlas confunde más que ayuda. */
+  if (G.dia){ G.dia = false; $("seed").disabled = false; }
   pintarDifs();
   regenerate();
 }
@@ -3080,8 +3665,8 @@ function desempaquetarRed(a){
    distingue un saludo de un tropiezo, así que sale el cilindro de siempre
    —tres mallas contra diecinueve— y su mezclador ni se toca. En una torre
    de 1.800 m lo normal es tener cero o un amigo dentro de este radio. */
-const DIST_ROBOT = 55;
-const DIST_ROBOT_SALE = 64;          // histéresis: ni parpadeos ni churn
+let DIST_ROBOT = 55;
+let DIST_ROBOT_SALE = 64;          // histéresis: ni parpadeos ni churn
 
 /* El interruptor.
    En TRUE (como está ahora): el robot sale en la partida normal, para ti y
@@ -3118,6 +3703,33 @@ const MODELO = {
   fallo: "", cola: [],
 };
 
+
+/* ─── POR QUÉ EL ROBOT SIGUE COSTANDO 19 LLAMADAS DE DIBUJO ───────────
+   Se intentó fusionarlo en este lote y se paró a tiempo. Queda escrito lo
+   que se midió, que es lo único que sirve para retomarlo:
+
+     · un robot en pantalla cuesta exactamente 19 llamadas (medido con
+       renderer.info: 36 con él, 17 sin él)
+     · son 4 SkinnedMesh (las dos manos, partidas en dos materiales cada
+       una) y 15 Mesh NORMALES colgadas directamente de huesos
+     · sólo hay 3 materiales: Main, Grey y Black
+     · las 4 mallas con esqueleto traen 4 objetos Skeleton distintos, pero
+       con EXACTAMENTE la misma lista de huesos
+
+   O sea que el premio está en las 15 mallas normales, no en las 4 con
+   esqueleto: fusionando sólo éstas se pasaría de 19 a 18.
+
+   Y convertir una malla colgada de un hueso en vértices con peso 1 sobre
+   ese hueso exige reescribir cada vértice contra la pose de ENLACE:
+       v = bindMatrix⁻¹ · mundoEnlace(hueso) · (hueso⁻¹ · mallaMundo) · v0
+   Al hacer esa cuenta aparece el mismo problema que ya nos mordió midiendo
+   la altura del personaje: three aplica la matriz del modelo Y la de
+   enlace, así que cualquier escala del contenedor entra dos veces. Con el
+   robot escalado a 1,70 m eso no es un detalle.
+
+   Se puede hacer, pero es un lote propio con sus pruebas, y el beneficio
+   sólo se nota con varios amigos en la sala. Se deja medido y sin tocar.  */
+
 function cargarModelo(cb){
   if (MODELO.estado === "listo" || MODELO.estado === "fallo") return cb && cb();
   if (cb) MODELO.cola.push(cb);
@@ -3132,19 +3744,15 @@ function cargarModelo(cb){
 
   new THREE.GLTFLoader().load(MODELO.ruta, (g) => {
     const m = g.scene;
-    /* El robot no tiene mapas, pero sí colores. glTF guarda baseColorFactor
-       en LINEAL y three lo copia tal cual a material.color; como este juego
-       escribe el framebuffer sin corregir, ese valor lineal se muestra como
-       si fuera sRGB y el robot sale apagado. convertLinearToSRGB() deja el
-       número que hay que escribir para que se VEA el color correcto. Es el
-       mismo problema que dejó el bidón negro, por otra puerta.
-       Se hace AQUÍ, una vez, sobre la plantilla: si se hiciera en cada copia
-       se convertiría dieciséis veces y cada amigo saldría de otro color. */
+    /* AQUÍ HABÍA UN APAÑO, y ya no hace falta.
+       glTF guarda baseColorFactor en LINEAL. Cuando el renderizador iba en
+       lineal, ese valor se escribía tal cual en pantalla y el robot salía
+       apagado, así que se le aplicaba convertLinearToSRGB() para compensar.
+       Con el renderizador en sRGB la tubería hace eso sola y en el sitio
+       correcto: compensar otra vez lo dejaría lavado. Se borró.           */
     m.traverse(o => {
       if (!o.isMesh) return;
       o.frustumCulled = false;          // sus huesos lo sacan de su caja original
-      for (const mat of (Array.isArray(o.material) ? o.material : [o.material]))
-        if (mat && mat.color){ mat.color.convertLinearToSRGB(); mat.needsUpdate = true; }
     });
 
     /* Se mide la altura DEFORMADA (pasando los vértices por sus huesos).
@@ -3309,17 +3917,17 @@ function rehacerCajaPersona(){
    entero (12 mallas), "Grey" el metal y "Black" los ojos. Así que el color
    del jugador es literalmente cambiar uno de los tres, sin tocar imágenes.
 
-   El hex de la paleta se pone DIRECTO, sin convertir: ya es sRGB y este
-   juego escribe el color tal cual al framebuffer, así que sale exactamente
-   el color que elegiste. (El color que traía el modelo sí hubo que
-   convertirlo, porque glTF lo guarda en lineal. No es lo mismo.) */
+   El hex de la paleta es sRGB —es un número de diseñador, pensado para una
+   pantalla— así que pasa por COL() como todos los demás colores escritos a
+   mano. Antes se ponía directo, porque el renderizador iba en lineal y los
+   dos errores se anulaban; ahora hay una sola regla y no hay excepciones. */
 function tintar(P, hex){
   if (!P || !P.raiz || !hex) return;
   P.tinte = hex;
   P.raiz.traverse(o => {
     if (!o.isMesh) return;
     for (const m of (Array.isArray(o.material) ? o.material : [o.material]))
-      if (m && m.name === "Main") m.color.set(hex);
+      if (m && m.name === "Main") m.color.copy(COL(hex));
   });
 }
 function tintarPersona(hex){ tintar(PERSONA, hex); }
@@ -3523,18 +4131,17 @@ function cargarProps(cb){
   for (const n of nombres) cargador.load(PROPS[n].ruta, (g) => {
     const m = g.scene;
     /* Este juego renderiza con el outputEncoding por defecto (lineal) y
-       toda su paleta está ajustada a eso. GLTFLoader marca la textura de
-       color como sRGB: three la des-gamma al leerla y no la vuelve a
-       aplicar al escribir, y el prop sale oscuro y lavado. Se le pone
-       encoding lineal para que entre en la misma tubería que el resto.
-       (Lo correcto sería poner el renderer en sRGB, pero eso cambia el
-       aspecto del juego ENTERO y es otra decisión.) */
+       toda su paleta estaba ajustada a eso, así que a las texturas de color
+       del bidón y de la silla se les forzaba encoding LINEAL para que
+       entraran en la misma tubería torcida que el resto.
+       Esa era «otra decisión» que quedó apuntada, y es la que se tomó en
+       este lote: el renderizador ya va en sRGB. GLTFLoader marca la textura
+       de color como sRGB, que es lo correcto, y ahora eso encaja solo. El
+       apaño se borró; sólo queda pedir que se recompilen los materiales. */
     m.traverse(o => {
       if (!o.isMesh || !o.material) return;
-      for (const mat of (Array.isArray(o.material) ? o.material : [o.material])){
-        if (mat.map){ mat.map.encoding = THREE.LinearEncoding; mat.map.needsUpdate = true; }
+      for (const mat of (Array.isArray(o.material) ? o.material : [o.material]))
         mat.needsUpdate = true;
-      }
     });
     m.updateMatrixWorld(true);
 
@@ -3908,7 +4515,10 @@ function pause(){
   $("pAlt").textContent=Math.round(Math.max(0,G.py))+" m";
   $("pBest").textContent=Math.round(G.best)+" m";
   $("pTime").textContent=fmt(G.elapsed);
+  Marcas.anotar();
+  $("pMarca").textContent=fmtMarca(Marcas.leer(G.dif, G.dia));
   $("btnCopiar").querySelector("strong").textContent="COPIAR ENLACE";
+  pintarAjustes();                   // por si la detección llegó jugando
   pintarRed();                       // deja el bloque de invitación al día
   $("pause").hidden=false;
   if (document.exitPointerLock) document.exitPointerLock();
@@ -3938,15 +4548,25 @@ async function copiarEnlace(){
 function resume(){ $("pause").hidden=true; G.mode="play"; lock(); }
 function win(){
   G.won=true; G.mode="win";
+  Snd.golpe("cima");
   $("wAlt").textContent=Math.round(G.best)+" m";
   $("wTime").textContent=fmt(G.elapsed);
   $("wWorst").textContent=Math.round(G.worst)+" m";
+  /* El récord se lee ANTES de anotar: si no, siempre saldría empatado
+     consigo mismo y nunca se vería un «mejor tiempo». */
+  const antes = Marcas.leer(G.dif, G.dia);
+  const mejorAntes = antes && antes.t ? antes.t : 0;
+  Marcas.anotar();
+  $("wMarca").innerHTML = (!mejorAntes || G.elapsed < mejorAntes)
+    ? "<b>Tu mejor tiempo hasta hoy</b>" + (mejorAntes ? " (antes " + fmt(mejorAntes) + ")" : "") +
+      (G.dia ? " en la torre de hoy." : " en " + DIFS[G.dif].nombre + ".")
+    : "Tu mejor tiempo sigue siendo <b>" + fmt(mejorAntes) + "</b>.";
   $("win").hidden=false;
   if (document.exitPointerLock) document.exitPointerLock();
 }
 function colorJugador(hex){
   G.color=hex;
-  const c=new THREE.Color(hex);
+  const c=COL(hex);
   if (W.playerBody) W.playerBody.material.color.set(c);
   if (W.playerVisor){ W.playerVisor.material.color.set(c); W.playerVisor.material.emissive.set(c); }
   tintarPersona(hex);      // el robot del lab lleva el mismo color que el cilindro
@@ -3981,10 +4601,12 @@ function codigoAzar(){
   return s;
 }
 function toMenu(){
+  Marcas.anotar();
   if (G.lab) limpiarLab();            // el botón MENÚ de la pausa también sale
   Net.cerrar(); limpiarRemotos(); log("");
   G.mode="menu"; $("hud").classList.remove("on");
   $("pause").hidden=true; $("win").hidden=true; $("menu").hidden=false;
+  pintarDifs();                       // los récords, recién actualizados
   if (document.exitPointerLock) document.exitPointerLock();
 }
 function lock(){
@@ -4001,8 +4623,18 @@ let hadLock=false, dragging=false;
    y, si ya nos habíamos salido por AFK, vuelve a entrar a la sala. */
 function actividad(){
   G.ultimaEntrada = performance.now();
+  /* El navegador no deja crear audio sin un gesto del jugador. Éste es el
+     sitio: ya se llama en la primera tecla, clic o toque. */
+  Snd.arrancar(); Snd.despertar();
   if (Net.dormido) Net.despertar();
 }
+/* Cerrar la pestaña a media subida no puede costarte el récord. pagehide
+   es el único evento fiable para esto: unload no se dispara en móviles. */
+addEventListener("pagehide", ()=>{ try { Marcas.anotar(); } catch(e){} });
+addEventListener("visibilitychange", ()=>{
+  if (document.visibilityState === "hidden"){ try { Marcas.anotar(); } catch(e){} }
+});
+
 for (const ev of ["keydown","mousedown","wheel","touchstart"])
   addEventListener(ev, actividad, {passive:true});
 // el ratón solo cuenta si se mueve de verdad
@@ -4054,6 +4686,12 @@ addEventListener("keydown",e=>{
   if (e.code==="Space" && G.mode==="play") e.preventDefault();
   if (G.keys[e.code]) return;
   G.keys[e.code]=true;
+  /* M silencia. Sólo en partida y en pausa: en el menú el foco puede estar
+     dentro de la casilla de la semilla y escribir una eme no tiene que
+     apagar el sonido. */
+  if (e.code==="KeyM" && (G.mode==="play" || G.mode==="pause")){
+    Snd.silenciar(); pintarAjustes(); avisoSonido();
+  }
   if (G.mode==="play"){
     if (e.code==="Space"){ G.buffer=BUFFER; doJump(); }
     if (e.code==="KeyR"){ respawn(); }
@@ -4237,6 +4875,7 @@ $("room").addEventListener("input",e=>{
   e.target.value=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,4);
 });
 $("btnRegen").addEventListener("click",()=>{
+  if (G.dia){ G.dia=false; $("seed").disabled=false; }
   $("seed").value=String(Math.floor(Math.random()*99999999));
   regenerate();
 });
@@ -4250,6 +4889,8 @@ $("height").addEventListener("change",regenerate);
 
 /* arranque */
 initWorld();
+Ajustes.aplicar();
+pintarAjustes();
 regenerate();
 // sala por enlace: .../torre.html#sala=ABCD entra de un clic
 const mSala = location.hash.match(/sala=([A-Za-z0-9]{1,4})/);
@@ -4270,6 +4911,10 @@ if (location.hash.replace(/^#/,"").split(/[&,;]/).includes("lab")) abrirLab();
 // corrección de posición al aterrizar y comprobar que no hay tirón.
 if (/\bdebug\b/.test(location.hash)){
   window.__T = { G, CAPS, AV, W, play, respawn, Net, Perf, buildMeshes,
+                 Snd, Ajustes, CALIDADES, pintarAjustes, avisoHUD,
+                 Marcas, semillaDelDia, fechaUTC, alternarDia, pintarDifs, fmtMarca,
+                 DIST:()=>DIST_ROBOT,
+                 nubes:(v)=>{ W.clouds.forEach((c,i)=>{ c.userData.op0=[0.46,0.32,0.22][i]*v; }); _cicloP=-9; },
                  FASES, aplicarCielo, progresoCielo, faseActual,
                  regenerate, buildTower, indexarTorre, doJump, JumpMath, MURO_ALTO,
                  colocarSendero, colocarCornisa, colocarTrampolines, DIFS,

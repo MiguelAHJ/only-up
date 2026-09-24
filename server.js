@@ -338,7 +338,25 @@ const server = http.createServer((req, res) => {
       res.end("Falta index.html junto a server.js");
       return;
     }
-    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    /* LA PÁGINA NO SE CACHEA A CIEGAS, y esto no es manía.
+       Iba sin ninguna cabecera de caché, así que el navegador aplicaba su
+       heurística y se quedaba con la copia vieja. Síntoma: despliegas, te
+       metes, y los cambios «no están» — con el archivo nuevo ya en el
+       servidor. Pasó de verdad con el lote de la sombra.
+
+       `no-cache` NO quiere decir «no la guardes»: quiere decir «guárdala,
+       pero pregúntame antes de usarla». Con el ETag, esa pregunta se
+       responde con un 304 vacío si nada cambió, así que no se paga el
+       tamaño de la página en cada carga — sólo una ida y vuelta.
+       El juego entero es este archivo: si él está al día, todo lo está. */
+    const etag = '"' + crypto.createHash("sha1").update(html).digest("base64").slice(0, 22) + '"';
+    if (req.headers["if-none-match"] === etag) {
+      res.writeHead(304, { etag, "cache-control": "no-cache" });
+      res.end();
+      return;
+    }
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8",
+                         "cache-control": "no-cache", etag });
     res.end(html);
   });
 });

@@ -1958,6 +1958,39 @@ function cloudTexture(){
   t.encoding=THREE.sRGBEncoding;          // es una textura de COLOR
   return t;
 }
+/* LA MANCHA DE SOMBRA.
+   Antes la sombra era un RingGeometry: un disco de borde duro, con el
+   agujero del anillo asomando en el centro. Se leía como una pegatina
+   pegada al suelo, no como una sombra.
+
+   Ahora es un degradado radial. Se usa como alphaMap y NO como map, y esa
+   decisión tiene motivo: un canvas guarda el color ya multiplicado por su
+   alfa, así que una textura de color con transparencia entra deformada en
+   la tubería sRGB —es justo lo que pasó con las nubes en el lote 23—.
+   Un alphaMap se lee del canal verde, es opaco, y el color lo pone el
+   material. Sin premultiplicados y sin sorpresas.
+
+   La curva no es lineal: un núcleo bastante sólido hasta el 35% del radio
+   y luego una caída larga. Una rampa lineal se ve como un cono y canta; lo
+   que parece una penumbra es un núcleo con una falda ancha. */
+function sombraTextura(){
+  const c = document.createElement("canvas"); c.width = c.height = 256;
+  const g = c.getContext("2d");
+  const gr = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+  /* El núcleo aguanta hasta casi la mitad del radio. La primera versión
+     empezaba a caer en el 35% y, de pie en el suelo, la sombra
+     desaparecía: el degradado se comía justo la parte que se ve. */
+  gr.addColorStop(0.00, "#ffffff");
+  gr.addColorStop(0.46, "#fafafa");
+  gr.addColorStop(0.64, "#c0c0c0");
+  gr.addColorStop(0.82, "#5a5a5a");
+  gr.addColorStop(1.00, "#000000");
+  g.fillStyle = gr; g.fillRect(0, 0, 256, 256);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
+
 function concreteTexture(){
   const c=document.createElement("canvas"); c.width=c.height=256;
   const g=c.getContext("2d"); g.fillStyle="#fff"; g.fillRect(0,0,256,256);
@@ -2044,8 +2077,13 @@ function initWorld(){
   W.playerBody=body; W.playerVisor=visor;
   W.scene.add(W.player);
 
-  W.shadow=new THREE.Mesh(new THREE.RingGeometry(0.06,0.5,28),
-    new THREE.MeshBasicMaterial({color:COL(0x0B0E14),transparent:true,opacity:0.5,depthWrite:false,fog:false}));
+  /* El plano mide 1,7 y no 1,0: con el degradado, la parte que se LEE
+     como sombra es el centro, así que hace falta plano de sobra alrededor
+     para que quepa la falda. El tamaño aparente acaba pareciéndose al
+     disco de antes. */
+  W.shadow=new THREE.Mesh(new THREE.PlaneGeometry(1.5,1.5),
+    new THREE.MeshBasicMaterial({ color:COL(0x0B0E14), alphaMap:sombraTextura(),
+      transparent:true, opacity:0.72, depthWrite:false, fog:false }));
   W.shadow.rotation.x=-Math.PI/2; W.scene.add(W.shadow);
 
   /* El lienzo se mide del CONTENEDOR, nunca de innerWidth/innerHeight.
@@ -3053,8 +3091,15 @@ function updateShadow(){
   const drop=(G.py-HY)-top;
   W.shadow.visible=true;
   W.shadow.position.set(G.px, top+0.03, G.pz);
-  W.shadow.scale.setScalar(clamp(1+drop*0.05,1,2.1));
-  W.shadow.material.opacity=0.52*clamp(1-drop/26,0.08,1);
+  /* Cuanto más lejos estás del suelo, más grande y más floja. Con una
+     mancha de degradado esto ya ablanda sola: al escalarla, la falda se
+     ensancha en metros de mundo y la penumbra se nota de verdad. Con el
+     anillo de antes crecer sólo hacía el disco más gordo.
+     Se escala un poco más que antes (2,6 en vez de 2,1) y se baja algo más
+     rápido, que es como se comporta una sombra al alejarse el que la
+     proyecta. */
+  W.shadow.scale.setScalar(clamp(1+drop*0.062,1,2.6));
+  W.shadow.material.opacity=0.72*clamp(1-drop/24,0.06,1);
 }
 
 /* ═══════════════════════════════════════════════════════════════

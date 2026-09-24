@@ -1,3 +1,105 @@
+# Cambios — 24 de septiembre de 2026 (vigesimosexto lote): que desplegar se note
+
+Miguel: «subí los cambios pero por ningún lado vi la sombra difusa, se sigue
+viendo el disco».
+
+Dos fallos, uno mío y uno del servidor.
+
+## 1 · Le di por entregado un archivo que no llegó
+
+El lote 25 decía «escrito» y en su disco seguía el `RingGeometry` viejo: su
+`index.html` era 2,3 KB más pequeño que el mío y con fecha anterior a mi
+escritura. Yo me fié de que la herramienta respondiera «written» y no lo
+comprobé.
+
+Ahora se **relee después de escribir** y se compara byte a byte. Se
+reescribió y quedó idéntico.
+
+## 2 · La página se servía sin ninguna cabecera de caché
+
+Y esto habría mordido en cada lote, con el archivo bueno ya en el servidor:
+
+```js
+res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+```
+
+Sin `cache-control`, el navegador aplica su heurística y se queda con la
+copia vieja. Despliegas, entras, y «los cambios no están».
+
+Ahora va con **`no-cache` y ETag**. `no-cache` no significa «no la
+guardes», significa «guárdala, pero pregúntame antes de usarla»; con el
+ETag esa pregunta se responde con un **304 vacío** si nada cambió, así que
+no se paga el cuarto de mega de la página en cada carga — sólo una ida y
+vuelta. El juego entero es este archivo: si él está al día, todo lo está.
+
+`/modelos/` sigue con `max-age=3600`, que para modelos está bien; si algún
+día cambiamos un `.gltf`, conviene acordarse de que tarda una hora en
+renovarse.
+
+## La prueba
+
+`test/cache.js`: que la página lleve `cache-control` y ETag, que con el
+ETag correcto conteste 304 sin cuerpo, que con uno viejo vuelva a mandarla,
+y —la que importa— que **al cambiar el archivo cambie el ETag**. Se rompió
+a propósito (ETag fijo) y se puso roja:
+
+```
+  FALLA  si el archivo cambia, el ETag cambia y ya no hay 304   304 · etag IGUAL (mal)
+```
+
+Esa es exactamente la avería que originó el lote, ahora con una prueba que
+la detecta.
+
+## Archivos tocados
+
+- `server.js` — `no-cache` + ETag en la página del juego
+
+---
+
+# Cambios — 23 de septiembre de 2026 (vigesimoquinto lote): la sombra, difusa
+
+Miguel: «¿podríamos hacer que la sombra del personaje se viese más difusa?».
+
+La sombra era un `RingGeometry(0.06, 0.5, 28)`: un disco de borde duro y de
+color plano, con el agujero del anillo asomando en el centro. Se leía como
+una pegatina pegada al suelo.
+
+Ahora es una mancha con degradado radial. Tres decisiones con motivo:
+
+**Va como `alphaMap`, no como `map`.** Un canvas guarda el color ya
+multiplicado por su alfa, así que una textura de color con transparencia
+entra deformada en la tubería sRGB — es exactamente lo que nos pasó con las
+nubes en el lote 23. Un `alphaMap` se lee del canal verde, es opaco, y el
+color lo pone el material. Sin premultiplicados y sin sorpresas.
+
+**La curva no es lineal.** Una rampa lineal se ve como un cono y canta. Lo
+que parece penumbra es un núcleo bastante sólido —hasta el 46% del radio— y
+después una falda larga.
+
+**Se ablanda de verdad al alejarte.** Antes crecer sólo hacía el disco más
+gordo; ahora, al escalar la mancha, la falda se ensancha en metros de mundo
+y la penumbra se nota. Escala hasta 2,6 (era 2,1) y se apaga algo más
+rápido, que es como se comporta una sombra cuando el que la proyecta se
+separa del suelo.
+
+## Un ajuste que hubo que medir a ojo, y por qué
+
+La primera versión quedó bien en el aire y **casi invisible de pie en el
+suelo**, que es donde más se mira. El degradado se comía justo la parte que
+se ve: empezaba a caer en el 35% del radio y con una opacidad base de 0,60
+el resultado efectivo era la mitad de oscuro que el disco de antes.
+
+Se corrigió por comparación directa —mismo encuadre, tres alturas de caída,
+antes y después— subiendo el núcleo al 46% del radio y la opacidad base a
+0,72, y encogiendo el plano de 1,7 a 1,5. Esto no tiene una prueba
+automática que lo juzgue: es aspecto, y se decide mirando.
+
+## Archivos tocados
+
+- `index.html` — `sombraTextura()`, la malla de la sombra y `updateShadow`
+
+---
+
 # Cambios — 23 de septiembre de 2026 (vigesimocuarto lote): papelería en MEDIA y DIFÍCIL
 
 Cuatro piezas nuevas de un modelo CC0 de papelería, ya probadas en el

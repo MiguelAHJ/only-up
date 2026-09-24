@@ -776,6 +776,21 @@ const PROPS = {
      flotando hasta 34 cm por encima del boli, que es exactamente lo que se
      veía. Los bolígrafos del archivo se estrechan; los lápices son prismas
      uniformes de punta a punta. Así que el corto es un lápiz gastado. */
+  /* ALCANTARILLA. Dos mallas del mismo archivo —marco y tapa— fundidas en
+     una sola geometría: comparten material, así que fundirlas deja el tramo
+     entero en UNA llamada de dibujo en vez de dos por tapa.
+     A tamaño real mide 0,69 m de diámetro, que es EXACTAMENTE lo que mide
+     de ancho el jugador; a ×2 son 1,38 y se aterriza con margen.
+     Colisionador: tres cajas inscritas giradas 60°, el mismo truco que el
+     bidón de pie, para que el borde del disco sea el borde de verdad y no
+     una caja cuadrada que te deja pisando aire en las esquinas. */
+  alcantarilla: { ruta:"modelos/alcantarilla/water_manhole_cover_1k.gltf",
+                  nodos:["water_manhole_cover_frame","water_manhole_cover"],
+                  escala:2.0,
+                  dePie: [ {c:[0,0.0676,0], t:[0.618,0.1352,1.237], yaw:0},
+                           {c:[0,0.0676,0], t:[0.618,0.1352,1.237], yaw:Math.PI/3},
+                           {c:[0,0.0676,0], t:[0.618,0.1352,1.237], yaw:2*Math.PI/3} ] },
+
   lapizcorto: { ruta:"modelos/papeleria/stationery_supplies_1k.gltf",
                 nodo:"stationery_supplies_pencil_old", escala:70.51,
                 dePie: [ {c:[0,0.500,0], t:[6.634,0.100,0.300]} ] }
@@ -795,13 +810,15 @@ const PROP_DIM = {
   goma:       { ancho:1.273, alto:0.300, fondo:0.532 },
   lapiz:      { ancho:13.466, alto:0.550, fondo:0.550 },
   lapizcorto: { ancho:6.634,  alto:0.550, fondo:0.550 },
+  alcantarilla: { ancho:1.382, alto:0.135, fondo:1.382 },
 };
 /* A qué altura queda la cara pisable de cada objeto, contando desde su
    base. Son las que se eligieron en el laboratorio, no cotas del modelo:
    el asiento de la silla está a 0,585 aunque el respaldo suba a 1,26. */
 const PROP_PISA = { bidonPie:0.880, bidonTumbado:0.563, silla:0.585,
                     /* del cubilete se pisa el BORDILLO, no la tapa: no tiene */
-                    cubilete:2.089, goma:0.300, lapiz:0.550, lapizcorto:0.550 };
+                    cubilete:2.089, goma:0.300, lapiz:0.550, lapizcorto:0.550,
+                    alcantarilla:0.135 };
 
 /* ═══════════════════════════════════════════════════════════════
    3 · Generador — mismas reglas que TorreGenerator.cs
@@ -983,7 +1000,11 @@ const TRAMPOLIN_ALTO = 4.0;                                  // metros de rebote
 const TRAMPOLIN_V = Math.sqrt(2 * BASE_GRAVITY * AV.gravityMultiplier * TRAMPOLIN_ALTO);
 
 // Una "caja" de colisión: centro, semiejes, yaw.
-function box(x,y,z,hw,hh,hd,yaw,kind){ return {x,y,z,hw,hh,hd,yaw,kind}; }
+/* `off` nace SIEMPRE, aunque casi ninguna caja lo use: si se añadiera
+   sólo a algunas, V8 tendría dos formas distintas de objeto en el bucle de
+   colisiones, que es el más caliente del juego. Una propiedad de más en
+   memoria sale mucho más barata que un acceso megamórfico. */
+function box(x,y,z,hw,hh,hd,yaw,kind){ return {x,y,z,hw,hh,hd,yaw,kind,off:false}; }
 
 /* Una cornisa. Devuelve dónde te deja para seguir construyendo.
    Empuja sus propios apoyos marcados tipo:"cornisa": la verificación por
@@ -2130,9 +2151,47 @@ function initWorld(){
    repetir la misma cuenta mil veces. */
 const PROPMOD = { bidon:null, bidonT:null, silla:null, cargando:false, listo:false };
 
+/* Pega varias geometrías en una. Hace falta porque la alcantarilla viene
+   partida en dos mallas —el marco y la tapa— que comparten material: sin
+   fundirlas serían dos llamadas de dibujo por cada tapa del tramo.
+   Se hace a mano y no con BufferGeometryUtils para no añadir una CUARTA
+   descarga de CDN. Sólo se copian los atributos que usa el juego; si
+   alguna malla trae otros, se quedan fuera a propósito.
+   Los índices de cada geometría empiezan en cero y hay que desplazarlos
+   por los vértices ya pegados: ése es el paso que, mal hecho, convierte el
+   modelo en una maraña de triángulos. */
+function fundirGeos(geos){
+  if (geos.length === 1) return geos[0];
+  const ATR = ["position", "normal", "uv"];
+  const total = geos.reduce((a, g) => a + g.attributes.position.count, 0);
+  const out = new THREE.BufferGeometry();
+  for (const a of ATR){
+    if (!geos.every(g => g.attributes[a])) continue;
+    const ej = geos[0].attributes[a], itm = ej.itemSize;
+    const buf = new ej.array.constructor(total * itm);
+    let off = 0;
+    for (const g of geos){ buf.set(g.attributes[a].array, off); off += g.attributes[a].array.length; }
+    out.setAttribute(a, new THREE.BufferAttribute(buf, itm, ej.normalized));
+  }
+  let nInd = 0;
+  for (const g of geos) nInd += g.index ? g.index.count : g.attributes.position.count;
+  const idx = total > 65535 ? new Uint32Array(nInd) : new Uint16Array(nInd);
+  let io = 0, vo = 0;
+  for (const g of geos){
+    const c = g.attributes.position.count;
+    if (g.index){ for (let i = 0; i < g.index.count; i++) idx[io++] = g.index.getX(i) + vo; }
+    else { for (let i = 0; i < c; i++) idx[io++] = i + vo; }
+    vo += c;
+  }
+  out.setIndex(new THREE.BufferAttribute(idx, 1));
+  return out;
+}
+
 function prepararGeoProp(malla, tumbado, escala){
-  const geo = malla.geometry.clone();
-  geo.applyMatrix4(malla.matrixWorld);            // por si el .gltf trae transformadas
+  const geo = Array.isArray(malla)
+    ? fundirGeos(malla.map(m => { const g = m.geometry.clone(); g.applyMatrix4(m.matrixWorld); return g; }))
+    : malla.geometry.clone();
+  if (!Array.isArray(malla)) geo.applyMatrix4(malla.matrixWorld);   // por si el .gltf trae transformadas
   /* La escala se cuece AQUÍ, en la geometría, y no en la matriz de cada
      copia: las piezas van por InstancedMesh y así todas las instancias
      comparten una geometría ya del tamaño bueno, sin que cada matriz tenga
@@ -2202,10 +2261,17 @@ function buildMeshes(tower){
     q.setFromEuler(e);
     pos.set(v.cx, v.cy, v.cz);
     im.setMatrixAt(i, m4.compose(pos, q, esc));
+    /* Se guarda dónde acabó cada pieza. Sin esto, animar UNA sola copia
+       obligaría a recorrer todo el grupo buscándola; con esto es un
+       setMatrixAt directo y el resto de la torre no se entera. */
+    v._im = im; v._ii = i; v._m0 = m4.clone();
     n.set(clave, i + 1);
   }
   for (const im of mallas.values()) im.instanceMatrix.needsUpdate = true;
   W.scene.add(W.group);
+  /* Después de instanciar, y no antes: el módulo necesita saber en qué
+     malla y en qué índice quedó cada tapa para poder animarla. */
+  Alcantarillas.reset(tower);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -2496,6 +2562,16 @@ const Snd = {
           this._osc("sawtooth", 320, 70, 0.55, 0.16, t);
           this._burst("lowpass", 700, 0.8, 0.5, 0.10, t);
           break;
+        case "cruje":
+          /* Crujido de metal: ruido filtrado estrecho que sube de tono.
+             Es el aviso, así que tiene que oírse sin mirar. */
+          this._burst("bandpass", 240, 6.0, 0.42, 0.13, t);
+          this._osc("sawtooth", 70, 118, 0.42, 0.055, t);
+          break;
+        case "derrumbe":
+          this._osc("sine", 110, 34, 0.55, 0.22, t);
+          this._burst("lowpass", 520, 0.8, 0.40, 0.14, t);
+          break;
         case "cima": {
           const notas = [523.25, 659.25, 783.99, 1046.50];
           notas.forEach((f, i) => this._osc("triangle", f, f, 0.30, 0.16, t + i*0.13));
@@ -2549,6 +2625,159 @@ const Snd = {
   }
 };
 Snd.cargar();
+
+/* ═══════════════════════════════════════════════════════════════
+   4f · ALCANTARILLAS QUE SE CAEN
+
+   Un tramo de diez o quince tapas separadas por saltos. Al pisar una,
+   aguanta 1,5 s y se cae: no se puede parar a pensar, hay que cruzar el
+   tramo entero al ritmo que marca el reloj.
+
+   Cómo está montado, y por qué así:
+
+   · EL RELOJ ES DEL MÓDULO, no `performance.now()`. Sólo avanza jugando,
+     así que pausar no te mata la tapa que tenías debajo, y el bucle ya
+     está acotado a 0,1 s por fotograma: un tirón no adelanta el reloj.
+
+   · EL COLISIONADOR NO SE BORRA, se apaga. Quitar cajas obligaría a
+     rehacer el índice espacial por altura, que es lo que sostiene el
+     rendimiento de las colisiones. Con un interruptor `off` que mira
+     resolverCaja, caer y volver cuestan lo mismo: cambiar un booleano.
+
+   · SE ANIMA LA INSTANCIA, no una malla aparte. Cada tapa vive dentro del
+     mismo InstancedMesh que el resto de objetos, así que quince tapas
+     cayendo siguen siendo UNA llamada de dibujo. Por eso buildMeshes le
+     apunta a cada pieza en qué malla y en qué índice quedó.
+
+   · EL DISPARO ES UN INSTANTE, no un estado continuo: «la tapa K se pisó
+     en el momento T» y de ahí sale todo lo demás. Está pensado así a
+     propósito, porque es lo único que habría que mandar por la red el día
+     que las tapas sean compartidas entre los jugadores de una sala.
+   ═══════════════════════════════════════════════════════════════ */
+const ALC = {
+  firme:  1.50,   // s de pie antes de caer  (lo pidió Miguel)
+  aviso:  0.50,   // s de temblor antes de caer, dentro de los 1,50
+  caida:  0.85,   // s de animación de caída
+  vuelve: 4.00,   // s desde que empieza a caer hasta que reaparece
+  brota:  0.28,   // s de estirón al volver
+  g:     16.0     // gravedad de la tapa (más lenta que la del jugador: se ve mejor)
+};
+
+const Alcantarillas = {
+  lista: [], reloj: 0,
+  _m4: null, _q: null, _e: null, _p: null, _s: null,
+
+  /* Se llama al construir una torre. Empareja cada tapa VISIBLE con sus
+     cajas de colisión por coincidencia de centro: las tres cajas inscritas
+     de una alcantarilla comparten exactamente el mismo centro, así que la
+     correspondencia es exacta y no hace falta que quien la coloca lleve
+     ninguna contabilidad aparte. */
+  reset(tower){
+    this.lista = []; this.reloj = 0;
+    if (!tower) return;
+    if (!this._m4){
+      this._m4 = new THREE.Matrix4(); this._q = new THREE.Quaternion();
+      this._e = new THREE.Euler();    this._p = new THREE.Vector3();
+      this._s = new THREE.Vector3();
+    }
+    const alto = PROP_PISA.alcantarilla;
+    for (const v of tower.visuals){
+      if (v.shape !== "prop" || v.prop !== "alcantarilla") continue;
+      const cy = v.cy + alto/2;
+      const cajas = [];
+      for (const b of tower.solids)
+        if (Math.abs(b.x - v.cx) < 0.02 && Math.abs(b.z - v.cz) < 0.02
+            && Math.abs(b.y - cy) < 0.02) cajas.push(b);
+      this.lista.push({ v, cajas, x:v.cx, z:v.cz, cima:v.cy + alto,
+                        fase:"firme", t:0, sono:false });
+    }
+  },
+
+  /* Todas firmes otra vez. Al reaparecer se llama a esto: si no, vuelves
+     del fondo a un tramo a medio caer y el reintento no es el mismo. */
+  reiniciar(){
+    for (const a of this.lista){
+      a.fase = "firme"; a.t = 0; a.sono = false;
+      for (const b of a.cajas) b.off = false;
+      this._poner(a, a.v._m0);
+    }
+  },
+
+  _poner(a, m){
+    if (a.v._im) { a.v._im.setMatrixAt(a.v._ii, m); a.v._im.instanceMatrix.needsUpdate = true; }
+  },
+
+  /* ¿Está el jugador de pie sobre alguna? Son diez o quince: recorrerlas
+     enteras sale más barato que cualquier índice. */
+  pisando(){
+    const pies = G.py - HY;
+    for (const a of this.lista){
+      if (a.fase !== "firme") continue;
+      if (Math.abs(pies - a.cima) > 0.09) continue;
+      const dx = G.px - a.x, dz = G.pz - a.z;
+      if (dx*dx + dz*dz < 0.85*0.85) return a;   // radio 0,69 + medio jugador
+    }
+    return null;
+  },
+
+  tick(dt){
+    if (!this.lista.length) return;
+    this.reloj += dt;
+
+    if (G.grounded){
+      const a = this.pisando();
+      if (a){ a.fase = "temblando"; a.t = this.reloj; a.sono = false; }
+    }
+
+    const m4 = this._m4, q = this._q, e = this._e, p = this._p, s = this._s;
+    for (const a of this.lista){
+      if (a.fase === "firme") continue;
+      const u = this.reloj - a.t;
+
+      if (a.fase === "temblando"){
+        if (u >= ALC.firme){
+          a.fase = "cayendo"; a.t = this.reloj;
+          for (const b of a.cajas) b.off = true;     // deja de sostener AQUÍ
+          Snd.golpe("derrumbe");
+          continue;
+        }
+        /* El temblor sólo en el último medio segundo: antes está quieta y
+           el aviso se lee de golpe, que es lo que da el respingo. */
+        const k = clamp((u - (ALC.firme - ALC.aviso)) / ALC.aviso, 0, 1);
+        if (k > 0 && !a.sono){ a.sono = true; Snd.golpe("cruje"); }
+        const amp = 0.035 * k;
+        p.set(a.x + Math.sin(u*63)*amp, a.v.cy + Math.sin(u*51)*amp*0.5, a.z + Math.cos(u*57)*amp);
+        e.set(Math.sin(u*44)*0.045*k, a.v.yaw, Math.cos(u*39)*0.045*k, "YXZ");
+        q.setFromEuler(e); s.set(1,1,1);
+        this._poner(a, m4.compose(p, q, s));
+
+      } else if (a.fase === "cayendo"){
+        if (u >= ALC.vuelve){
+          a.fase = "firme"; a.sono = false;
+          for (const b of a.cajas) b.off = false;
+          this._poner(a, a.v._m0);
+          a.fase = "brotando"; a.t = this.reloj;
+          continue;
+        }
+        const f = Math.min(u, ALC.caida);
+        const esc = Math.max(0, 1 - Math.pow(f/ALC.caida, 1.6));
+        p.set(a.x, a.v.cy - 0.5*ALC.g*f*f, a.z);
+        e.set(f*0.9, a.v.yaw, f*0.55, "YXZ");
+        q.setFromEuler(e); s.set(esc, esc, esc);
+        this._poner(a, m4.compose(p, q, s));
+
+      } else if (a.fase === "brotando"){
+        /* Vuelve con un estirón corto: sin él aparece de la nada y el
+           jugador no se entera de que ya se puede volver a pisar. */
+        if (u >= ALC.brota){ a.fase = "firme"; this._poner(a, a.v._m0); continue; }
+        const k = u / ALC.brota, esc = 0.55 + 0.45*(1 - Math.pow(1-k, 3));
+        p.set(a.x, a.v.cy, a.z);
+        e.set(0, a.v.yaw, 0, "YXZ"); q.setFromEuler(e); s.set(esc, esc, esc);
+        this._poner(a, m4.compose(p, q, s));
+      }
+    }
+  }
+};
 
 /* ═══════════════════════════════════════════════════════════════
    4d · AJUSTES DE CALIDAD
@@ -2933,6 +3162,7 @@ function indexarTorre(tower){
    Con subpasos de 6 cm la penetración es diminuta, así que la corrección
    es invisible: eso es lo que elimina el teletransporte al aterrizar. */
 function resolverCaja(b){
+  if (b.off) return;              // alcantarilla caída: ya no sostiene a nadie
   const dyw=G.py-b.y;
   if (Math.abs(dyw) >= b.hh+HY) return;
   const dxw=G.px-b.x, dzw=G.pz-b.z;
@@ -3002,6 +3232,7 @@ function doJump(){
 }
 
 function respawn(){
+  Alcantarillas.reiniciar();      // el tramo se reintenta entero, no a medias
   const s=G.tower.start;
   G.px=s.x; G.py=1.4; G.pz=s.z;
   G.vx=G.vy=G.vz=0;
@@ -3079,6 +3310,7 @@ function updateShadow(){
     if (!arr) continue;
     for (let i=0;i<arr.length;i++){
       const b=arr[i], ty=b.y+b.hh;
+      if (b.off) continue;                       // no hay sombra sobre lo que se cayó
       if (ty > G.py-HY+0.02) continue;
       const dxw=G.px-b.x, dzw=G.pz-b.z;
       const c=Math.cos(b.yaw), s=Math.sin(b.yaw);
@@ -3695,6 +3927,7 @@ function loop(now){
     W.player.position.set(G.px, G.py-HY, G.pz);
     if (Math.hypot(G.vx,G.vz)>0.6) W.player.rotation.y=Math.atan2(G.vx,G.vz);
     if (PERSONA.activo) actualizarPersona(dt);
+    Alcantarillas.tick(dt);
     updateShadow();
     Net.tick(now);
     hud();
@@ -4442,27 +4675,43 @@ function cargarProps(cb){
       /* Con `nodo` se elige la pieza por nombre; sin él, la primera malla,
          que es como funcionaban el bidón y la silla (un archivo, una
          pieza) y se deja igual para no tocar lo que ya va bien. */
+      /* Una pieza puede salir de VARIAS mallas del archivo (`nodos`), no
+         sólo de una (`nodo`): la alcantarilla son el marco y la tapa. */
+      const quiere = P.nodos || (P.nodo ? [P.nodo] : null);
       let malla = null;
-      m.traverse(o => {
-        if (!o.isMesh || malla) return;
-        if (!P.nodo) { malla = o; return; }
-        // el nombre puede estar en la malla o en el nodo que la contiene
-        if (o.name === P.nodo || (o.parent && o.parent.name === P.nodo)) malla = o;
-      });
-      if (!malla){ fallos.push(n + " (nodo «" + P.nodo + "» no está)"); continue; }
+      if (!quiere){
+        m.traverse(o => { if (o.isMesh && !malla) malla = o; });
+      } else {
+        const trozos = [];
+        for (const nom of quiere){
+          let t = null;
+          m.traverse(o => {
+            if (!o.isMesh || t) return;
+            if (o.name === nom || (o.parent && o.parent.name === nom)) t = o;
+          });
+          if (t) trozos.push(t);
+        }
+        if (trozos.length !== quiere.length){
+          fallos.push(n + " (faltan nodos: " + quiere.filter((nom,i) => !trozos[i]).join(", ") + ")");
+          continue;
+        }
+        malla = trozos.length === 1 ? trozos[0] : trozos;
+      }
+      if (!malla){ fallos.push(n + " (nodo «" + (P.nodo||"?") + "» no está)"); continue; }
 
       const k = P.escala || 1;
+      const matPieza = Array.isArray(malla) ? malla[0].material : malla.material;
       if (n === "bidon"){
-        PROPMOD.bidon  = { geo: prepararGeoProp(malla, false, k), mat: malla.material };
-        PROPMOD.bidonT = { geo: prepararGeoProp(malla, true,  k), mat: malla.material };
+        PROPMOD.bidon  = { geo: prepararGeoProp(malla, false, k), mat: matPieza };
+        PROPMOD.bidonT = { geo: prepararGeoProp(malla, true,  k), mat: matPieza };
       } else {
-        PROPMOD[n] = { geo: prepararGeoProp(malla, false, k), mat: malla.material };
+        PROPMOD[n] = { geo: prepararGeoProp(malla, false, k), mat: matPieza };
       }
 
       /* La copia del laboratorio: se clona SOLO la pieza que toca (si no,
          las cuatro de papelería saldrían con las nueve encima), se le
          aplica la escala y se baja la base al suelo. */
-      const copia = malla.clone();
+      const copia = (Array.isArray(malla) ? malla[0] : malla).clone();
       copia.geometry = PROPMOD[n === "bidon" ? "bidon" : n].geo;   // ya escalada y centrada
       copia.position.set(0,0,0); copia.rotation.set(0,0,0); copia.scale.set(1,1,1);
       copia.matrixAutoUpdate = true;
@@ -4511,6 +4760,27 @@ function montarLab(){
   };
   const placa = (x,mat) => caja(x,0.012,0, 3.0,0.024,3.0, mat, false);
   const pon   = (tipo,x,y,tumbado,z,giro) => props.push({tipo,x,y,z:z||0,tumbado,giro:giro||0});
+
+  /* PONER UN OBJETO COMO LO PONE EL JUEGO, no como lo pinta el banco.
+     El resto del laboratorio dibuja los props clonando el modelo en un
+     grupo aparte (`LAB.grupo`), que se ve igual y es cómodo para el banco
+     — pero NO es el camino que usa la torre de verdad, que los mete por
+     InstancedMesh. Para el tramo de caída eso importa: la mecánica anima
+     la instancia, así que probándola sobre clones no se estaría probando
+     nada de lo que va a correr en la partida.
+     Esto empuja el visual y sus colisionadores con exactamente la misma
+     forma de datos que ponerProp, y así el banco ejercita el código bueno. */
+  const ponInst = (tipo, x, yBase, z, giro) => {
+    visuals.push({ cx:x, cy:yBase, cz:z, sx:1, sy:1, sz:1, yaw:giro||0,
+                   shape:"prop", prop:tipo, tumbado:false, mat:tipo });
+    const g = giro||0, c0 = Math.cos(g), s0 = Math.sin(g);
+    for (const b of (PROPS[tipo].dePie || [])){
+      const dx =  b.c[0]*c0 + b.c[2]*s0;
+      const dz = -b.c[0]*s0 + b.c[2]*c0;
+      solids.push({ x:x+dx, y:yBase+b.c[1], z:z+dz,
+                    hw:b.t[0]/2, hh:b.t[1]/2, hd:b.t[2]/2, yaw:g + (b.yaw||0), off:false });
+    }
+  };
   /* Coloca las cajas de un prop con su base en (x,y,z) y girado por yaw.
      El motor define el giro así: una caja con yaw tiene su eje local +z
      apuntando al mundo (sin yaw, cos yaw). Invirtiendo esa relación, un
@@ -4527,7 +4797,7 @@ function montarLab(){
     }
   };
 
-  caja(40,-0.5,0, 104,1,16, "hormigon", true);                   // suelo del banco
+  caja(54,-0.5,0, 132,1,16, "hormigon", true);                   // suelo del banco
 
   // ── BIDONES ─────────────────────────────────────────────────────────
   // 1 · de pie con la caja cuadrada de antes: 11,7 cm de aire en la esquina
@@ -4622,6 +4892,31 @@ function montarLab(){
   caja(LX + 7.4, LY/2 + 0.275, 0, 1.6, LY + 0.55, 2.4, "hormigon", true);
   pon("lapiz", LX, LY, false, 0, 0);
   deProp(LX, LY, PROPS.lapiz.dePie);
+
+  /* ── 16 · TRAMO DE CAÍDA ─────────────────────────────────────────
+     Doce alcantarillas en espiral, flotando y sin nada debajo. Cada una
+     aguanta 1,5 s desde que la pisas; a los 1,0 empieza a temblar y a
+     sonar, y a los 1,5 se cae. Vuelve sola 4 s después.
+
+     La espiral y no una fila recta por dos motivos: cabe en diez metros
+     —se prueba sin caminar cien— y obliga a girar en el aire, que es lo
+     que de verdad cuesta cuando no puedes pararte a mirar.
+
+     Separación entre tapas: 4,6 m. El salto simple llega a 6,2, así que
+     hay margen; lo difícil tiene que ser el reloj, no la distancia. */
+  const TC = { x:110, z:0, r:4.6, dAng:55*Math.PI/180, sube:1.15, n:12 };
+  // plataforma de salida, para poder encarar el primer salto con carrera
+  caja(TC.x - TC.r - 3.2, 0.3, TC.z, 4.0, 0.6, 4.0, "galv", true);
+  for (let k = 0; k < TC.n; k++){
+    const a = k*TC.dAng;
+    ponInst("alcantarilla", TC.x + TC.r*Math.cos(a), 1.0 + k*TC.sube, TC.z + TC.r*Math.sin(a), a);
+  }
+  // meta: si llegas aquí, el tramo está pasado
+  {
+    const a = TC.n*TC.dAng;
+    caja(TC.x + TC.r*Math.cos(a), 1.0 + TC.n*TC.sube + 0.09, TC.z + TC.r*Math.sin(a),
+         2.2, 0.18, 2.2, "peligro", true);
+  }
 
   /* ── MINITORRE ────────────────────────────────────────────────────
      Un nivel pequeño de verdad, ~11 m, construido solo con los dos props.
@@ -4756,6 +5051,8 @@ function pintarLab(){
     n(11) + 'cubilete <span class="bien">anillo</span> · cae dentro y sube al bordillo &nbsp; ' +
     n(12) + 'goma &nbsp; ' + n(13) + 'dos gomas · escalón de 0,30 &nbsp; ' +
     n(14) + 'lápiz corto 6,6 m &nbsp; ' + n(15) + '<b>lápiz: puente de 13,5 m</b><br>' +
+    n(16) + '<b>TRAMO DE CAÍDA</b> · doce alcantarillas en espiral, al este del todo &nbsp;·&nbsp; ' +
+    'cada una aguanta <b>1,5 s</b> (tiembla y suena a partir de 1,0) y vuelve a los 4<br>' +
     tecla + ' alambres de colisión: <b>' + (LAB.verAlambres ? "sí" : "no") + '</b>' +
     ' &nbsp;·&nbsp; <span class="tec">Ctrl+Alt+B</span> salir' +
     filaPersona();
@@ -5280,6 +5577,7 @@ if (/\bdebug\b/.test(location.hash)){
                  Snd, Ajustes, CALIDADES, pintarAjustes, avisoHUD,
                  Marcas, semillaDelDia, fechaUTC, alternarDia, pintarDifs, fmtMarca,
                  DIST:()=>DIST_ROBOT, arcoLibre, aireSobre, sepultado, alturaArco,
+                 Alcantarillas, ALC,
                  nubes:(v)=>{ W.clouds.forEach((c,i)=>{ c.userData.op0=[0.46,0.32,0.22][i]*v; }); _cicloP=-9; },
                  FASES, aplicarCielo, progresoCielo, faseActual,
                  regenerate, buildTower, indexarTorre, doJump, JumpMath, MURO_ALTO,

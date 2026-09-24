@@ -1,3 +1,122 @@
+# Cambios — 24 de septiembre de 2026 (vigesimoséptimo lote): tramo de caída, en el laboratorio
+
+Alcantarillas que aguantan 1,5 s y se caen. Doce en espiral, en el banco de
+pruebas. **Todavía no está en la torre**: esto es para probar el tacto.
+
+## El tamaño no era un detalle
+
+La tapa mide **0,69 m de diámetro** a tamaño real, que es exactamente lo que
+mide de ancho el jugador. Con doce seguidas y reloj, eso no es difícil: es
+una lotería. Va a **×2 — 1,38 m**, así que se aterriza con margen y el reto
+queda donde tiene que estar, en el ritmo.
+
+El colisionador son **tres cajas inscritas giradas 60°**, el mismo truco que
+el bidón de pie: el borde del disco es el borde de verdad y no una caja
+cuadrada que te deja pisando aire en las esquinas. Y el nivel de pisada sale
+de medir la tapa con rayos, no de la caja envolvente: la cara de arriba está
+a **0,1352** y es plana en el 72% del disco (lo demás es el relieve de 3 cm).
+Eso es lo que falló con el bolígrafo y no se repite.
+
+Las dos mallas del archivo —marco y tapa— se **funden en una** al cargar.
+Comparten material, así que el tramo entero cuesta **una llamada de dibujo**
+en vez de dos por tapa. Texturas: 2.077 KB → **97 KB** en WebP de 512.
+
+> Nota comprobada al entregar: los archivos de imagen llegan al disco
+> **recomprimidos** por el puente, no byte a byte. Las tres texturas ocupan
+> allí 115 KB en vez de 97 y llevan una segunda pasada de compresión con
+> pérdida. Son WebP válidos de 512×512 y se ven igual, así que no hace nada
+> malo — pero las cifras de texturas de éste y de los lotes anteriores son
+> las de ORIGEN, y en el repositorio están un 15-20% por encima.
+
+## La mecánica
+
+| | |
+|---|---|
+| aguanta de pie | **1,50 s** |
+| avisa (tiembla y suena) | a partir de **1,00 s** |
+| cae en | 0,85 s, girando y encogiendo |
+| vuelve sola a los | **4,00 s** |
+
+Cuatro decisiones de fontanería, que son las que hacen que esto sea barato:
+
+**El reloj es del módulo, no del navegador.** Sólo avanza jugando, así que
+pausar no te mata la tapa que tienes debajo.
+
+**El colisionador no se borra, se apaga.** Quitar cajas obligaría a rehacer
+el índice espacial por altura, que es lo que sostiene el rendimiento de las
+colisiones. Con un interruptor que mira `resolverCaja`, caer y volver
+cuestan cambiar un booleano. La propiedad nace en TODAS las cajas aunque
+casi ninguna la use: si se añadiera sólo a algunas, V8 tendría dos formas de
+objeto en el bucle más caliente del juego.
+
+**Se anima la instancia, no una malla aparte.** Cada tapa vive en el mismo
+`InstancedMesh` que el resto de objetos: quince cayendo siguen siendo una
+llamada de dibujo. Para eso `buildMeshes` ahora le apunta a cada pieza en
+qué malla y en qué índice quedó.
+
+**El disparo es un instante**, no un estado continuo: «la tapa K se pisó en
+el momento T», y de ahí sale todo lo demás. Está pensado así a propósito,
+porque es lo único que habrá que mandar por la red cuando las tapas sean
+compartidas entre los jugadores de una sala — que es lo que elegiste y va en
+su propio lote.
+
+## El laboratorio estaba probando otra cosa
+
+Al montar el tramo salió un problema de fondo: **el banco dibuja los objetos
+clonando el modelo en un grupo aparte, no por instanciado**. O sea que todas
+las pruebas de props que hemos hecho en el laboratorio se hacían sobre un
+camino de dibujo que la torre no usa.
+
+Para el bidón o la silla daba igual porque sólo se miraban. Aquí no: la
+mecánica anima la instancia, así que probarla sobre clones no probaría nada
+de lo que va a correr en la partida. El tramo usa `ponInst`, que empuja el
+visual y sus colisionadores **con la misma forma de datos que `ponerProp`**,
+y así el banco ejercita el código bueno.
+
+Las estaciones 1 a 15 siguen como estaban. Vale la pena pasarlas a lo mismo
+algún día; hoy no era el lote.
+
+## Pruebas
+
+`test/alcantarillas.js`: las medidas grabadas, estar de pie en **32 puntos
+del disco** con los pies exactamente en la cara que se ve, el reloj (avisa a
+1,017 · cae a 1,517 · vuelve 4,00 s después), que al caerse **deje de
+sostener** —el jugador se queda sin suelo 8 ms después—, que vuelva y se
+pueda volver a pisar, y que las doce se crucen saltando.
+
+Cuatro mutaciones, cuatro rojas:
+
+| se rompió | saltó |
+|---|---|
+| la tapa cae pero sigue sosteniendo | «SE QUEDÓ DE PIE EN EL AIRE» |
+| aguanta 3 s en vez de 1,5 | «3.017 s» |
+| las colisiones ignoran el interruptor | «SE QUEDÓ DE PIE EN EL AIRE» |
+| el colisionador 6 cm más alto de lo que se ve | «32 de 32 mal… quedaron en 1.1952 y la cara está en 1.135» |
+
+La última es exactamente la queja del bolígrafo, ahora con una prueba que la
+detecta sola.
+
+El piloto que cruza el tramo tuvo que aprender a saltar: su primera versión
+saltaba siempre a velocidad de carrera y se pasaba de largo (1 de 12). Con
+4,6 m de hueco y 1,15 de subida el vuelo dura 0,83 s, así que la velocidad
+buena ronda 5,6 m/s y no los 6,4 de correr. Medía si mi piloto sabía saltar,
+no si el tramo se cruza.
+
+## Lo que falta antes de meterlo en la torre
+
+- decidir cada cuánto aparece un tramo y de cuántas tapas
+- el lote de red para que las tapas sean **compartidas** en las salas
+- y probarlo tú, que es para lo que está en el banco
+
+## Archivos tocados
+
+- `index.html` — módulo `Alcantarillas`, interruptor `off` en las
+  colisiones, referencia de instancia en `buildMeshes`, fundido de mallas en
+  el cargador, estación 16 del laboratorio, dos sonidos nuevos
+- `modelos/alcantarilla/` — modelo CC0 de Poly Haven con texturas en WebP
+
+---
+
 # Cambios — 24 de septiembre de 2026 (vigesimosexto lote): que desplegar se note
 
 Miguel: «subí los cambios pero por ningún lado vi la sombra difusa, se sigue

@@ -32,10 +32,19 @@ en vez de dos por tapa. Texturas: 2.077 KB → **97 KB** en WebP de 512.
 
 | | |
 |---|---|
-| aguanta de pie | **1,50 s** |
-| avisa (tiembla y suena) | a partir de **1,00 s** |
+| aguanta de pie | **1,00 s** |
+| avisa (tiembla y suena) | a partir de **0,60 s** |
 | cae en | 0,85 s, girando y encogiendo |
 | vuelve sola a los | **4,00 s** |
+
+Nació en 1,50 y Miguel lo bajó a 1,00 al probarlo. El aviso bajó con él, de
+0,50 a 0,40: medio segundo de temblor sobre una ventana de uno dejaría la
+tapa temblando la mitad del tiempo y el temblor dejaría de ser una señal.
+Así quedan 0,6 s de calma y luego el aviso.
+
+Medido con el motor: aun quedándose **0,9 s quieto en cada tapa** se cruzan
+las doce. O sea que con 1,00 s el límite ya no es la física sino la reacción
+del jugador, que es exactamente donde tiene que estar el reto.
 
 Cuatro decisiones de fontanería, que son las que hacen que esto sea barato:
 
@@ -80,9 +89,11 @@ algún día; hoy no era el lote.
 
 `test/alcantarillas.js`: las medidas grabadas, estar de pie en **32 puntos
 del disco** con los pies exactamente en la cara que se ve, el reloj (avisa a
-1,017 · cae a 1,517 · vuelve 4,00 s después), que al caerse **deje de
+0,617 · cae a 1,017 · vuelve 4,00 s después), que al caerse **deje de
 sostener** —el jugador se queda sin suelo 8 ms después—, que vuelva y se
-pueda volver a pisar, y que las doce se crucen saltando.
+pueda volver a pisar, que las doce se crucen saltando, y **cuánta holgura
+queda de verdad**: el piloto espera X segundos sobre cada tapa antes de
+saltar y se busca la X más grande con la que aún cruza.
 
 Cuatro mutaciones, cuatro rojas:
 

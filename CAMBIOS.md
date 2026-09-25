@@ -1,3 +1,541 @@
+# Cambios — 25 de septiembre de 2026 (trigésimo primer lote): los escalones de la cima bajan 80 cm
+
+Lo pidió Miguel después de quedarse atascado en la torre 20260918: «que ese
+tipo de saltos bajara un poquitico nada más, solo con que bajase 1 m yo creo
+que ya llego». Tenía razón, y su idea era mejor que la mía: yo había estado
+tocando el **hueco** (la distancia), que es lo que enrollaba la torre sobre
+sí misma. La **subida** no mueve las plataformas de sitio.
+
+Sale a 80 cm y no a 1 m, por una razón medida que está más abajo.
+
+## El cambio
+
+Una cosa. El sorteo de la subida de cada escalón resta ahora, sólo por
+arriba y en proporción a la dificultad:
+
+```js
+const GENAJ = { bajaCima: 0.8 };
+const subidaAlta = subidaMax*lerp(0.62,1,dif) - GENAJ.bajaCima*dif;
+```
+
+En la base de la torre (`dif = 0`) no resta nada; en la cima resta los 80 cm
+enteros. El escalón más alto pasa de **3,95 m a 3,12 m**.
+
+## Por qué funciona
+
+Para subir 3,90 m hay que doblar cerca del pico, y ese arco tarda 1,26 s en
+volver a bajar a esa altura. Recorrer los 6,99 m que el generador permitía
+en 1,26 s pide **5,5 m/s**, y con el teclado sólo hay 3,2 (Shift) o 6,4
+(carrera): esa velocidad no existe salvo frenando en el aire en el instante
+justo, sobre un tablón de 0,56 m. La traza del mejor de 120 intentos pasaba
+por el punto exacto **todavía subiendo** y se iba 8 m de largo.
+
+Bajar el techo acorta el vuelo y ensancha la ventana de aterrizaje.
+
+## Lo medido
+
+Escalones normales imposibles (ninguna de 144 formas humanas de ejecutarlos
+funciona), en cinco semillas:
+
+| semilla | MEDIA antes → ahora | DIFÍCIL antes → ahora |
+|---|---|---|
+| 20260918 | 20 → 7 | 16 → 7 |
+| 12345678 | 25 → 10 | 21 → 11 |
+| TORRE01 | 26 → 12 | 14 → 5 |
+| kodary | 25 → 10 | 12 → 3 |
+| ABCD | 17 → 8 | 15 → 5 |
+| **total** | **113 → 47 (−58%)** | **78 → 31 (−60%)** |
+
+Y de regalo, los dos pilotos mejoran solos:
+
+| | antes | ahora |
+|---|---|---|
+| cornisas de MEDIA | 99,8% | **100%** |
+| senderos de MEDIA | 94,4% | **97,0%** |
+| senderos de DIFÍCIL | 94,9% | **96,9%** |
+
+Ese 94,4% de los senderos venía del lote 24 y estaba pendiente de explicar.
+
+## Por qué 80 cm y no el metro
+
+Con el metro entero la torre necesita más escalones para la misma altura, se
+densifica, y **los arcos cortados suben**: son saltos cuyo camino queda
+bloqueado y el generador tiene que recolocar. Medido sobre 90 torres por
+dificultad, que es donde deja de haber ruido:
+
+| bajada | arcos cortados (FÁCIL · MEDIA · DIFÍCIL) |
+|---|---|
+| 0,0 m (hoy) | 6 · 11 · 11 |
+| **0,8 m** | **11 · 9 · 10** |
+| 1,0 m | 14 · 14 · 13 ← pasa el umbral (90/8 = 12) |
+
+A 0,8 m se conserva el 58–60% de la mejora y la métrica de calidad del
+generador se queda en su sitio. La diferencia para jugar es de 20 cm en los
+escalones más altos: 3,12 m en vez de 2,94.
+
+**Con 25 torres esto no se veía**: los valores saltaban de 2 a 6 sin orden,
+y estuve a punto de ajustar el parámetro a una realización del azar. Una
+sola muestra no sirve para comparar generadores.
+
+## Lo que NO entró
+
+- **Margen según la anchura de la plataforma.** Medido: el factor real es
+  0,854 con losa de 2 m y **0,624** con losa de 0,6 m, frente al 0,90 fijo
+  que usa el generador. El número es bueno; aplicarlo acortaba los huecos y
+  eso subía los imposibles de 17 a **64**, porque la torre se enrolla y las
+  plataformas se hacen tapa unas de otras.
+- **Aire para saltar sobre la salida** (`aireSobre >= dy`). Es un invariante
+  correcto —`AIRE_PISAR` garantiza que CABES de pie, no que puedas SALTAR—
+  pero con los huecos actuales no cambia nada medible (8 vs 7 en una
+  semilla, o sea ruido) y no conseguí que ninguna mutación lo pusiera rojo.
+  Un cambio en el generador que no se puede demostrar no entra.
+- **Tope absoluto de distancia.** Barrido: 7 → 10 → 13 → 3 → 10. No es
+  monótono. Cambiar el hueco reordena la torre entera, así que cada valor
+  era prácticamente otra torre al azar.
+- **Un suelo del 45% en la subida.** Escrito y quitado: el mínimo de la
+  expresión son 2,46 m y el suelo 1,78, así que nunca se activaba. Código
+  muerto.
+
+## La prueba
+
+`test/saltos.js`, nueva. Pilota los **escalones normales**, que hasta hoy no
+se habían jugado nunca en una prueba: se registran sin `tipo` y el
+comentario del generador decía «lo verifica la fórmula»; `vm`/`vd` sólo
+pilotan cornisas, senderos y trampolines. El fallo de Miguel vivía justo en
+ese hueco.
+
+Lleva dentro dos controles que se ganaron el sitio a base de mentiras:
+exigir que **ambos** apoyos sean normales (si la salida es una cornisa, el
+recorrido real no sigue por ahí) y comprobar que se puede uno **plantar** en
+cada apoyo (el de un cubilete cae en su agujero). Sin ellos salían
+«imposibles» de 2,00 m, y un salto simple sube 2,20.
+
+Mutaciones que la ponen roja: deshacer la bajada (4 fallos, vuelve a 20 y
+16), y dejarla a la mitad (2 fallos, el escalón más alto vuelve a 3,57).
+
+Regresión completa: `generador`, `props`, `papeleria`, `alcantarillas`,
+`camara`, `personaje`, `gestos`, `lote23`, `instancias`, `shift`, `cache`,
+`rueda`, `saltos` — 0 fallos. Más los dos pilotos, con los números de
+arriba.
+
+## Los récords
+
+Las torres cambian de trazado, así que los récords guardados se refieren a
+torres que ya no existen. Miguel lo eligió así: borrón y cuenta nueva.
+
+## Archivos tocados
+
+- `index.html` — el sorteo de la subida, y seis nombres más en el volcado de
+  depuración para que las herramientas de medida puedan trabajar
+- `test/saltos.js` — nueva
+- `test/subida.js`, `altura.js`, `banco.js`, `frontera.js`, `culpable.js`,
+  `traza.js` — herramientas de medida del lote 30
+
+---
+
+# Cambios — 25 de septiembre de 2026 (trigésimo lote): por qué hay saltos que sólo se pasan de chiripa
+
+**Este lote no cambia el juego.** Es la investigación de un fallo que Miguel
+encontró jugando, con lo medido, lo descartado, y **dos intentos de arreglo
+que empeoraron las cosas y por eso no se entregan**. Lo único que llega al
+código son cuatro nombres más en la consola de depuración, para que las
+herramientas nuevas puedan trabajar.
+
+## El síntoma
+
+Torre 20260918. Cerca de los 200 m, un salto que sólo salía bordando el
+doble salto; Miguel lo pasó de casualidad tras mucho rato. Más arriba, a
+unos 610 m, el mismo escenario y ya no lo pasó nunca. «Pensé que el nivel no
+se podía pasar.»
+
+## Lo que pasa, con la traza delante
+
+El escalón de DIFÍCIL a 1137 m: 3,90 m de subida, 6,99 m de distancia. Mejor
+de 120 ejecuciones:
+
+```
+  t      avance   altura        ← el objetivo está en avance 6,99 · altura 3,90
+ 1.10      6.71     3.80
+ 1.20      7.38     4.09        ← pasa por el punto exacto…
+ 1.30      8.04     4.22        ← …pero todavía SUBIENDO
+ 2.40     15.40    -9.12        ← y se va 8 m de largo
+```
+
+Pasa por donde tiene que pasar y no aterriza, porque llega **subiendo**. La
+plataforma de llegada es un tablón de **0,56 m** de ancho.
+
+El mecanismo exacto: para subir 3,90 m hay que doblar cerca del pico, y ese
+arco tarda 1,26 s en volver a bajar a esa altura. Recorrer 6,99 m en 1,26 s
+pide **5,5 m/s**. Con el teclado sólo hay 3,2 (Shift) o 6,4 (carrera): la
+velocidad que ese salto exige no existe salvo frenando en el aire en el
+instante justo, sobre un tablón de medio metro.
+
+## El número
+
+`maxGap` calcula «velocidad de carrera × tiempo de vuelo» y el generador usa
+el 90% de eso. Pero esa fórmula describe un **punto**, no una plataforma:
+exige llegar a esa distancia exacta con esa velocidad exacta. Medido en
+banco con el motor de verdad (`test/frontera.js`), buscando para cada subida
+la distancia máxima que aún deja el 20% de las ejecuciones válidas:
+
+| ancho de la losa de llegada | factor real | el generador usa |
+|---|---|---|
+| 2,00 m | **0,854** | 0,900 |
+| 0,60 m | **0,624** | 0,900 |
+
+Y es casi constante en toda la escala de subidas (0,60–0,64 en la estrecha).
+Con plataforma estrecha el generador se pasa un **45%**. En la cima de
+DIFÍCIL coinciden las tres cosas peores: subida máxima, hueco al 98% del
+máximo y plataformas de 0,31 m (`anchoMin` 0,38 × 0,82).
+
+Recuento sobre la torre real, pilotando los escalones normales (que **nunca
+se habían pilotado**: se registran sin `tipo` y el comentario del generador
+dice «lo verifica la fórmula»; `vm`/`vd` sólo pilotan cornisas, senderos y
+trampolines): **17 de 132 escalones de DIFÍCIL son 0 de 120**.
+
+## Lo que NO es (medido y descartado)
+
+- **No es la altura.** El salto doble real sube 4,365 m frente a los 4,40 de
+  la fórmula: se pierden 3,5 cm. Para los 3,96 m que el generador permite
+  hay **440 ms de ventana**. Eso no es un salto perfecto.
+- **No es un techo.** Los 17 imposibles tienen 9 m de aire libre encima, en
+  salida y en llegada.
+- **No es sólo el ancho.** Aislado en banco, ese salto sobre losa estrecha
+  sale 18 de 120: difícil, no imposible. El ancho agrava; mata el 98%.
+- **No es el freno aéreo del lote 28.** `target` no depende de si hay teclas
+  pulsadas, así que soltar en el aire no frena. Comprobado en el código.
+
+## Dos arreglos que empeoraron la torre
+
+**Intento 1 — margen según la anchura** (0,90 → 0,62 para losas estrechas,
+más suelo de 0,62 m de ancho). Resultado: **de 17 imposibles a 64**. Al
+acortar los huecos sin tocar las subidas, la torre se enrolla sobre sí misma
+y las plataformas se hacen tapa unas de otras: todos los nuevos fallos
+tenían 3,0–3,8 m de aire sobre la salida cuando hacían falta 3,7 para subir.
+`AIRE_PISAR` son 1,80 m: garantiza que **cabes** de pie, nunca que puedas
+**saltar**. Y `arcoLibre` no lo ve, porque muestrea el camino hacia delante
+y ese techo está justo encima del sitio del que despegas.
+
+**Intento 2 — lo anterior más exigir `dy + 0,35` de aire sobre la salida.**
+Los techos desaparecen (aire 9,00 otra vez) y bajan de 64 a **33**. Sigue
+siendo peor que los 17 de partida. La causa, ya identificada: con suelo de
+anchura en 0,62 m la plataforma **de salida** también es un tablón y
+desaparece la carrerilla — y mi banco daba 5,2 m de carrerilla. El banco era
+optimista de forma sistemática y por eso sus números no trasladaban.
+
+Revertidos los dos. La medición vuelve exacta a la línea de partida (17
+imposibles en DIFÍCIL), `generador.js` en 26 OK y 0 fallos.
+
+## Mediciones mías que hubo que tirar
+
+- La primera pasada daba «imposibles» de 2,00 m. Un salto simple sube 2,20:
+  la medición mentía. Tomaba como escalón cualquier par consecutivo de
+  `apoyos`, incluidos los que salen de una cornisa o del final de un
+  sendero. Con el pico del mejor intento en 0,69 m — la firma de estar
+  saltando bajo un techo. Arreglado exigiendo que **ambos** apoyos sean
+  normales, más un control de «¿se puede uno plantar aquí?» que descartó
+  tres apoyos que caen en el agujero de un cubilete.
+- Un rayo hacia abajo decía que no había suelo en **ningún** punto de
+  llegada. `hitsSolid` recibe **un objeto**, no seis números.
+- El banco de dos losas suspendió su propio control («escalón fácil» 18 de
+  120) porque la rejilla **siempre** hacía salto doble, y así los saltos
+  cortos se pasan de largo. Añadida la opción de no doblar.
+
+## Lo que falta
+
+El arreglo tiene que tocar las tres cosas a la vez —hueco, subida y
+anchura—, porque cambiar una sola reequilibra la torre hacia otro fallo. El
+siguiente paso es rehacer el banco con la plataforma de salida **estrecha**,
+como en la torre, para que sus números trasladen; con eso la frontera medida
+sirve para fijar los tres topes de una vez. Y el criterio de aceptación ya
+está escrito: `test/altura.js` sobre la torre real, exigiendo 0 imposibles y
+subiendo el peor margen.
+
+## Archivos tocados
+
+- `index.html` — **sólo** cuatro nombres más en el volcado de depuración
+  (`indexarTorre`, `box`, `JumpMath`, `AV`, `MARGEN`, `AIRE_PISAR`). El juego
+  se comporta exactamente igual.
+- `test/subida.js`, `test/altura.js`, `test/banco.js`, `test/frontera.js`,
+  `test/culpable.js`, `test/traza.js` — nuevos, herramientas de medida.
+
+---
+
+# Cambios — 24 de septiembre de 2026 (vigesimonoveno lote): la rueda de gestos, y el menú de pausa que no se podía ni cerrar
+
+Dos cosas que no tienen nada que ver entre sí salvo que las dos son **la
+interfaz no me deja**: una rueda para elegir gesto con la T o con el dedo, y
+el arreglo del menú de pausa, que en un móvil en horizontal se quedaba sin
+scroll y secuestraba la partida.
+
+---
+
+## 1. El menú de pausa en horizontal — el que urgía
+
+Este no era una mejora: era un **atasco**. Giras el móvil, pausas, y el menú
+mide más que la pantalla. No había scroll, así que no se llegaba a
+«REANUDAR». La partida quedaba secuestrada y la única salida era recargar.
+
+Medido a 740×360 (un móvil corriente girado): **634 px de menú en 360 px de
+pantalla**. Sobran 274.
+
+Y se había vuelto más alto por mi culpa: los ajustes de calidad del lote 23
+metieron tres botones y un control de volumen ahí dentro.
+
+El CSS era este:
+
+```css
+.overlay{ ... display:flex; align-items:center; justify-content:center; padding:24px }
+```
+
+Dos fallos en una línea, y hacían falta los dos arreglos:
+
+- **No había `overflow`.** Lo que sobresale de un elemento `position:fixed`
+  sin `overflow` no se puede desplazar: simplemente está fuera.
+- **`align-items:center` recorta por arriba.** Es el fallo clásico de centrar
+  con flex: cuando el hijo es más alto que el padre, el desbordamiento
+  superior queda **fuera del área desplazable** y es inalcanzable aunque
+  pongas scroll. Medido: el borde de arriba del menú caía en **y = −125**.
+
+La cura:
+
+```css
+.overlay{ ...; align-items:flex-start; overflow-y:auto; overscroll-behavior:contain;
+          -webkit-overflow-scrolling:touch }
+.overlay > *{ margin:auto }
+```
+
+`margin:auto` en el hijo centra **mientras sobra sitio** y se queda en cero
+cuando no sobra — que es exactamente lo que `align-items:center` no hace.
+`overscroll-behavior:contain` evita que el tirón al final del menú arrastre
+la página de debajo.
+
+Además, por debajo de 560 px de alto se aprieta el aire (padding 24 → 12,
+separación entre bloques 16 → 9).
+
+**Lo que NO era**: pensé primero en `touch-action:none`, que apaga el scroll
+táctil. No era: esa regla sólo vive bajo `body.tactil.jugando`, y en pausa la
+clase `jugando` está quitada. El manejador global de `touchstart` también se
+aparta cuando `G.mode !== "play"`. Comprobados los dos antes de tocar el CSS.
+
+---
+
+## 2. La rueda de gestos
+
+Las cifras del 1 al 9 siguen igual —son lo más rápido que hay— pero hay que
+sabérselas, y **en el móvil no existían**: hasta hoy un jugador de móvil no
+tenía absolutamente ninguna forma de hacer un gesto.
+
+La rueda enseña los nueve con su nombre **y su número**, así que además de
+servir para elegir, enseña los atajos.
+
+### Tres formas de usarla, un solo mecanismo
+
+- **Mantener la T.** Abre, empujas el ratón hacia el gesto, sueltas la T y
+  sale. No hay que soltar el ratón ni acertarle a nada: basta empujar en una
+  dirección.
+- **Tocar la T** (menos de 230 ms sin empujar). Se queda fija: eliges con el
+  ratón y haces clic, o pulsas una cifra, o Esc.
+- **El dedo.** El botón **GESTOS** abre la rueda y el **mismo dedo** la
+  apunta: arrastras y sueltas. Soltarlo en el centro sin moverlo la deja fija
+  para tocar un sector con calma.
+
+### Por qué la selección es un vector y no «el cursor encima del sector»
+
+Jugando hay **bloqueo de puntero**: no hay cursor que poner encima de nada,
+sólo llegan deltas de movimiento. Acumularlos en un vector y mirar su
+**ángulo** funciona igual con ratón bloqueado, con ratón libre y con un dedo
+— y de paso es lo que permite elegir empujando, sin apuntar fino.
+
+El vector se recorta a 150 px: un manotazo no vale más que un empujón,
+porque lo que cuenta es hacia dónde, no cuánto.
+
+### Mientras está abierta, el muñeco se planta
+
+La cámara no gira y las teclas de movimiento no mueven. No es por gusto: un
+gesto **exige estar parado y en el suelo** (lo exige `iniciarGesto`, y con
+razón — un gesto a media caída te roba el control). Dejar que te muevas
+mientras eliges sólo serviría para que al soltar no saliera nada. Por lo
+mismo, con la rueda abierta Espacio no salta y Esc cierra la rueda en vez de
+pausar.
+
+Si aun así el gesto no sale (estabas en el aire), **se avisa en el HUD**:
+«GESTOS: EN EL SUELO Y PARADO». Quedarse callado se lee como un botón roto.
+
+### Detalles
+
+- Dibujada en HTML/SVG, no en el canvas: texto nítido a cualquier densidad,
+  cero draw calls, no toca el bucle de render.
+- La rueda se cierra sola al salir de partida (taparía el menú de pausa y se
+  comería los clics).
+- **La `T` del laboratorio se mudó a la `Y`.** Restaurar la caja del jugador
+  estaba en la T, y la rueda tiene que poder probarse también en el lab.
+- **Nada que sincronizar por red**: la rueda sólo llama a `iniciarGesto`, y
+  los gestos ya viajaban. El protocolo no cambia ni un bit.
+
+---
+
+## 3. Las pruebas — y dos verdes que no valían nada
+
+`test/rueda.js`, 25 comprobaciones. Todas mutadas. Dos merecen contarse
+porque estaban **verdes midiendo la nada**:
+
+**La cámara.** «Con la rueda abierta el ratón no gira la cámara»: movía el
+ratón y comprobaba que el yaw no cambiaba. Pero sin bloqueo de puntero ni
+arrastre, el manejador de mirada **se retira en su primera línea**. El yaw no
+cambiaba nunca, con rueda y sin ella. Quitando el congelado, seguía verde.
+Ahora hay un **control**: primero se comprueba que sin rueda el mismo gesto
+**sí** gira la cámara (0,79 rad). Si el control no gira, es que el camino no
+se recorre y lo de abajo no mide nada — y falla el control.
+
+**Y encima, dos errores que se cancelaban.** Al arreglar lo anterior seguía
+sin saltar, por dos motivos a la vez: el ayudante movía el ratón a tres
+coordenadas **absolutas fijas**, así que llamarlo dos veces daba
+desplazamiento neto **exactamente cero**; y la `T` llevaba pulsada desde el
+principio de la prueba, de modo que el segundo `keydown` no abría nada (el
+manejador ignora repeticiones mirando `G.keys`). Uno tapaba al otro.
+
+Mutaciones que ahora sí saltan:
+
+| mutación | qué salta |
+|---|---|
+| overlay vuelve a `align-items:center` sin `overflow` | 3 fallos (no declara scroll · `scrollTop` se queda en 0 · el último botón en y=622 de 360) |
+| se quita sólo `margin:auto` dejando `center` | borde superior del menú en **y=−125** |
+| el ratón vuelve a girar la cámara con la rueda abierta | yaw se mueve 0,792 rad |
+| se quita el freno del movimiento | 5,75 m andados en 1 s · y el gesto deja de salir |
+| el reparto de sectores se desfasa medio sector | los 9 centros eligen el de al lado |
+| soltar la T deja de disparar | no sale ningún gesto |
+| la cifra deja de cerrar la rueda | la rueda se queda abierta |
+| la T deja de abrir | 11 fallos |
+
+Regresión completa, **esta vez con los pilotos incluidos** (en el lote 24
+dije «regresión completa» sin haberlos pasado, y no estaba bien dicho):
+`generador`, `props`, `papeleria`, `alcantarillas`, `camara`, `personaje`,
+`gestos`, `lote23`, `instancias`, `shift`, `cache`, `rueda` — 0 fallos.
+Piloto de MEDIA: cornisas **563/564 = 99,8 %**, senderos **252/267 = 94,4 %**
+— idéntico a antes, que es lo que tenía que salir: nada de hoy toca la
+generación ni la física.
+
+`test/personaje.js` cambia una tecla (`KeyT` → `KeyY`) por la mudanza del
+laboratorio.
+
+---
+
+## Archivos tocados
+
+- `index.html` — CSS del overlay, rueda de gestos (sección 4g), botón táctil,
+  enganches de teclado/ratón/dedo, la T del lab a la Y
+- `test/rueda.js` — nuevo
+- `test/personaje.js` — la tecla del lab
+
+`server.js`, `Dockerfile` y `package.json` sin tocar. Despliegue de siempre:
+`git add -A`, `git commit`, `git push`.
+
+---
+
+# Cambios — 24 de septiembre de 2026 (vigesimoctavo lote): el salto corto, que no existía
+
+Un amigo de Miguel avisó de que **saltar andando llegaba igual de lejos que
+saltar corriendo**. Era cierto, y medido sobre una pista lisa con teclas de
+verdad:
+
+| | despegue | máx en el aire | alcance |
+|---|---|---|---|
+| corriendo | 6,40 | 6,72 | **6,47 m** |
+| andando (Shift) | 3,20 | **6,72** | **6,35 m** |
+
+El 98%. Despegabas a la mitad de velocidad y el control aéreo te devolvía a
+la de carrera durante el casi segundo que dura el vuelo.
+
+## Una línea
+
+```js
+const cap = G.grounded ? target : Math.max(target, AV.runSpeed) * 1.05;
+```
+
+En el suelo el tope era 3,2 con Shift; **en el aire 6,72 lo llevaras o no**.
+Así que Shift servía para colocarte en el borde y para nada más — aunque el
+propio menú prometiera «para ajustar el borde antes de un salto fino». Esa
+segunda mitad no se cumplía, y ahora el menú lo dice bien.
+
+## Cómo queda
+
+| | alcance |
+|---|---|
+| corriendo | 6,47 m *(igual que antes)* |
+| andando con Shift | **3,23 m** — la mitad |
+| andando y soltando Shift en el aire | 6,35 m — se recupera el 98% |
+
+Vale igual para el joystick del móvil: `target` ya era continuo entre andar
+y correr, así que inclinarlo poco da también un salto corto. Es la misma
+regla, y tratarlos distinto sería peor.
+
+**Quien no toca Shift tiene exactamente el juego de antes**, y las garantías
+del generador están calculadas a velocidad de CARRERA, así que siguen
+valiendo tal cual.
+
+## El error que me comí por el camino
+
+Quise que el freno fuera progresivo —un recorte seco de 6,7 a 3,4 en el aire
+se ve como chocar contra una pared invisible— y bajé la VELOCIDAD poco a
+poco dejando el tope quieto. Resultado:
+
+```
+  CORRIENDO            6.40      40.43        22.64 m
+```
+
+Cuarenta metros por segundo y saltos de veintidós metros. El freno (0,058
+m/s por subpaso) era más flojo que la aceleración aérea (0,205), así que el
+tope no sujetaba nada.
+
+El recorte tiene que seguir siendo **firme**; lo que se mueve despacio es el
+**tope**: sube al instante y baja a 14 m/s². Pulsar Shift en pleno vuelo
+frena en 0,24 s en vez de dar un frenazo.
+
+## Pruebas
+
+`test/shift.js`, permanente: corriendo se salta lo de siempre, andando es
+corto de verdad, el tope en el aire baja con Shift (y no sólo el despegue),
+soltándolo se recupera el salto largo, y nadie sale disparado.
+
+Dos mutaciones:
+
+| se rompió | saltó |
+|---|---|
+| volver al tope viejo | «6.35 m · el 98% del de carrera» |
+| el tope baja de golpe, sin freno | «tardó 0.004 s en bajar de 6.72 a 3.36» |
+
+La segunda se ganó el sitio **a posteriori**: quité el freno y ninguna
+prueba se puso roja, así que hubo que escribir la asertiva que lo vigila.
+Con freno son 0,242 s, exactamente los (6,72−3,36)/14 que dice la cuenta.
+
+## Y algo que encontré verificando, que no es de este lote
+
+Al pasar los dos pilotos de cornisas y senderos salió esto:
+
+| | lote 23 | ahora |
+|---|---|---|
+| senderos MEDIA | 98,5% | **94,4%** |
+| cornisas | 100% | 99,8% |
+| steppers | 100% | 99,9% |
+| senderos DIFÍCIL | 97,0% | **98,1%** |
+| rebotes DIFÍCIL | 97,7% | **98,2%** |
+
+Comprobado que **no es el cambio de hoy**: con el tope viejo y las mismas
+torres salen exactamente las mismas cifras (563/564 y 252/267). Viene del
+lote 24, el de la papelería en el generador — y en aquel lote dije
+«regresión completa» sin haber pasado estos dos pilotos. No estaban.
+
+DIFÍCIL mejoró, MEDIA empeoró cuatro puntos en senderos. Queda apuntado
+para mirarlo con calma.
+
+## Archivos tocados
+
+- `index.html` — el tope de velocidad en el aire, y el texto del menú que
+  ahora dice la verdad sobre Shift
+
+---
+
 # Cambios — 24 de septiembre de 2026 (vigesimoséptimo lote): tramo de caída, en el laboratorio
 
 Alcantarillas que aguantan 1,5 s y se caen. Doce en espiral, en el banco de

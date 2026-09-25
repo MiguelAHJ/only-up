@@ -57,6 +57,39 @@
   #btnPausaT{right:calc(16px + env(safe-area-inset-right,0px));
     top:calc(14px + env(safe-area-inset-top,0px));
     width:44px;height:44px;border-radius:10px;font-size:15px}
+  /* El botón de gestos va ENCIMA del de saltar y más pequeño: se usa
+     parado y con calma, y no puede robarle sitio al dedo que salta. */
+  #btnGesto{right:calc(46px + env(safe-area-inset-right,0px));
+    bottom:calc(152px + env(safe-area-inset-bottom,0px));
+    width:64px;height:64px;border-radius:50%;font-size:9px}
+  #btnGesto.pulsado{background:rgba(232,228,220,.18)}
+  @media (max-height:420px){
+    #btnGesto{width:54px;height:54px;bottom:calc(128px + env(safe-area-inset-bottom,0px))}
+  }
+
+  /* ── LA RUEDA DE GESTOS ──────────────────────────────────────────
+     Va en HTML y no en el canvas a propósito: son nueve etiquetas de
+     texto y un resaltado, y el DOM las dibuja nítidas a cualquier
+     densidad de pantalla sin tocar el bucle de render ni sumar draw
+     calls. pointer-events:none porque los dedos y el ratón se leen en
+     los manejadores globales, no por sectores: así el mismo código
+     sirve para el ratón con puntero bloqueado —que no tiene cursor que
+     poner encima de nada— y para el dedo. */
+  #rueda{position:fixed;inset:0;z-index:5;display:flex;align-items:center;
+    justify-content:center;pointer-events:none;touch-action:none;
+    background:rgba(11,14,20,.34);backdrop-filter:blur(2px)}
+  #rueda[hidden]{display:none!important}
+  #rueda svg{width:min(70vh,70vw);height:min(70vh,70vw);overflow:visible;
+    filter:drop-shadow(0 12px 34px rgba(0,0,0,.6))}
+  #rueda .sec{fill:rgba(11,14,20,.82);stroke:var(--edge);stroke-width:.7}
+  #rueda .sec.on{fill:rgba(255,107,44,.30);stroke:var(--ember);stroke-width:1.5}
+  #rueda text{font-family:var(--mono);text-anchor:middle;dominant-baseline:middle}
+  #rueda .eti{fill:var(--bone);font-size:6px;letter-spacing:.09em;opacity:.72}
+  #rueda .eti.on{opacity:1}
+  #rueda .num{fill:var(--ash);font-size:5.2px;opacity:.6}
+  #rueda .num.on{fill:var(--ember);opacity:1}
+  #rueda .cen{fill:var(--bone);font-size:7px;letter-spacing:.14em}
+  #rueda .aro{fill:none;stroke:var(--edge);stroke-width:.7}
   /* Aquí hubo un botón de reinicio al lado de SALTAR. Mala idea: respawn()
      te manda al suelo, o sea que borra la subida entera, y estaba a 46 px
      del pulgar que salta. Reiniciar vive donde debe, en el menú de pausa
@@ -258,8 +291,31 @@
     color:var(--bone);font-family:var(--mono);font-size:15px;padding:11px 12px;outline:none}
   input:focus{border-color:var(--ember)}
 
-  .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+  /* CENTRADO QUE NO SE COME LA MITAD DE ARRIBA.
+     Esto era `align-items:center` sin `overflow`, y en un móvil en
+     horizontal —unos 360 px de alto— el menú de pausa mide más que la
+     pantalla: el navegador lo centraba, recortaba por ARRIBA y por abajo, y
+     no había scroll que valiese. O sea que ni siquiera se llegaba a
+     "REANUDAR". Es el fallo clásico de centrar con flex: cuando el hijo es
+     más alto que el padre, el desbordamiento de arriba queda fuera del área
+     desplazable y es inalcanzable.
+     La cura son dos piezas, y las dos hacen falta:
+       · overflow-y:auto para que haya scroll cuando sobra alto.
+       · align-items:flex-start + margin:auto en el hijo. Los márgenes
+         automáticos centran MIENTRAS sobra sitio y se quedan en cero
+         cuando no sobra — a diferencia de align-items:center, que sigue
+         centrando y recortando.
+     overscroll-behavior:contain evita que el tirón al final del menú
+     arrastre la página de debajo. */
+  .overlay{position:fixed;inset:0;display:flex;align-items:flex-start;justify-content:center;
+    overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;
     background:rgba(11,14,20,.9);backdrop-filter:blur(7px);padding:24px}
+  .overlay > *{margin:auto}
+  /* En horizontal de móvil cada píxel de alto cuenta: se aprieta el aire. */
+  @media (max-height:560px){
+    .overlay{padding:12px}
+    .overlay .ovbox{gap:9px}
+  }
   .overlay[hidden]{display:none!important}
   #ajustes,#ajustesPausa{display:flex;flex-direction:column;gap:10px}
   .ajson{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:stretch}
@@ -278,8 +334,11 @@
 <div id="tactil">
   <div id="joy"><div class="anillo"></div><div id="joyKnob"></div></div>
   <button class="btnT" id="btnSalto" type="button">SALTAR</button>
+  <button class="btnT" id="btnGesto" type="button" aria-label="Gestos">GESTOS</button>
   <button class="btnT" id="btnPausaT" type="button" aria-label="Pausa">❚❚</button>
 </div>
+
+<div id="rueda" hidden aria-hidden="true"></div>
 
 <div id="labinfo" hidden></div>
 
@@ -366,10 +425,11 @@
     <div class="rule"></div>
     <div class="keys">
       <kbd><b>W A S D</b> MOVER</kbd><kbd><b>RATÓN</b> CÁMARA</kbd>
-      <kbd><b>ESPACIO</b> SALTAR ×2</kbd><kbd><b>SHIFT</b> ANDAR (PRECISIÓN)</kbd>
+      <kbd><b>ESPACIO</b> SALTAR ×2</kbd><kbd><b>SHIFT</b> ANDAR · SALTO CORTO</kbd>
+      <kbd><b>T</b> RUEDA DE GESTOS</kbd><kbd><b>1…9</b> GESTO DIRECTO</kbd>
       <kbd><b>R</b> REINICIAR</kbd><kbd><b>ESC</b> PAUSA</kbd>
     </div>
-    <div class="note warn">Corres por defecto: las distancias están calculadas a <b>velocidad de carrera</b>. Shift te hace andar, para ajustar el borde antes de un salto fino.</div>
+    <div class="note warn">Corres por defecto: las distancias están calculadas a <b>velocidad de carrera</b>. Con <b>Shift</b> andas <em>y saltas corto</em>: la mitad de lejos (3,2 m frente a 6,5). Si lo sueltas en el aire, recuperas el salto largo.</div>
   </div>
 </div>
 
@@ -444,6 +504,19 @@ const AV = {
 };
 const BASE_GRAVITY = 9.81;
 const MARGEN = 0.90;          // margenSeguridad del generador
+
+/* CUÁNTO SE LE BAJA A LOS ESCALONES MÁS ALTOS.
+   maxRise dice que un salto doble sube 4,40 m y el generador colocaba
+   hasta el 90% de eso (3,96 m) en la cima. Medido, el salto doble real
+   sube 4,365 m, así que de altura va sobrado — el problema es que a esa
+   subida el arco tarda 1,26 s en volver a bajar, y entonces la distancia
+   que el generador permite obliga a llegar a una velocidad exacta que con
+   el teclado no existe. Bajar el techo de la subida acorta el vuelo y
+   ensancha la ventana de aterrizaje.
+   Se resta sólo ARRIBA y en proporción a la dificultad: los escalones
+   bajos del principio no cambian, los de la cima bajan estos 80 cm. Es un
+   objeto para que las pruebas puedan barrer el valor sin tocar el código. */
+const GENAJ = { bajaCima: 0.8 };
 /* Las semiextensiones de la caja del jugador. NO es un cilindro ni una
    cápsula: es una caja de 0,70 × 1,70 × 0,70 y el motor la resuelve con
    resolverCaja, igual que a cualquier plataforma.
@@ -1485,9 +1558,13 @@ function buildTower(seedStr, alturaObjetivo, difId){
       monumento = GEN.descansosEntreMonumentos>0 && descansos % GEN.descansosEntreMonumentos===0; }
 
     const subidaMax = JumpMath.maxRise(CAPS, MARGEN);
+    /* Se resta en proporción a la dificultad, así que abajo no resta nada
+       (dif=0) y en la cima resta los 80 cm enteros. El mínimo de esta
+       expresión son 2,46 m, en la base de la torre: no hace falta suelo. */
+    const subidaAlta = subidaMax*lerp(0.62,1,dif) - GENAJ.bajaCima*dif;
     let dy = descanso ? 1.0 + rnd()*0.9
-                      : subidaMax*0.34 + rnd()*(subidaMax*lerp(0.62,1,dif) - subidaMax*0.34);
-    dy = Math.min(dy, subidaMax);
+                      : subidaMax*0.34 + rnd()*(subidaAlta - subidaMax*0.34);
+    dy = Math.min(dy, subidaAlta);
 
     let huecoMax = JumpMath.maxGap(CAPS, dy, MARGEN);
     if (huecoMax < 0){ dy = subidaMax*0.8; huecoMax = JumpMath.maxGap(CAPS, dy, MARGEN); }
@@ -3023,7 +3100,8 @@ const G = {
   ultimaEntrada:0,        // última vez que tocaste teclado o ratón (ver siesta)
   // cámara amortiguada — desacoplada de la posición física
   camX:0, camY:0, camZ:0, camDist:6.2,
-  saltosRaton:0        // eventos de ratón descartados por absurdos
+  saltosRaton:0,       // eventos de ratón descartados por absurdos
+  capAire:0            // tope de velocidad en el aire (baja despacio con Shift)
 };
 
 const G_UP   = CAPS.gUp;
@@ -3055,6 +3133,11 @@ function physicsStep(h){
   let analog = -1;
   if (G.stick){ ix = G.stick.x; iz = G.stick.z; analog = G.stick.mag; }
 
+  /* Con la rueda de gestos abierta el muñeco se planta. Un gesto sólo sale
+     estando parado y en el suelo, así que dejar que se mueva mientras
+     eliges no daría libertad: daría un gesto que no sale. */
+  if (typeof Rueda !== "undefined" && Rueda.abierta){ ix = 0; iz = 0; analog = -1; }
+
   const mag=Math.hypot(ix,iz);
   if (mag>0){ ix/=mag; iz/=mag; }
 
@@ -3077,9 +3160,47 @@ function physicsStep(h){
     const sp=Math.hypot(G.vx,G.vz);
     if (sp>0.0001){ const f=Math.max(0,sp-FRICTION*h)/sp; G.vx*=f; G.vz*=f; }
   }
+  /* EL SALTO CORTO, que hasta hoy no existía.
+     Aquí ponía:
+
+         cap = grounded ? target : max(target, runSpeed) * 1.05
+
+     o sea que en el aire el tope IGNORABA a Shift. Despegabas andando a
+     3,2 y el control aéreo te volvía a subir hasta 6,72 durante el casi
+     segundo que dura el vuelo. Medido sobre una pista lisa: el salto
+     andando llegaba a 6,35 m y el corriendo a 6,47 — el 98%. Shift servía
+     para colocarte en el borde y para nada más, aunque el menú prometiera
+     «para ajustar el borde antes de un salto fino».
+
+     Ahora el tope en el aire es el mismo que pides con las teclas. Dos
+     detalles que no son cosmética:
+
+     · EL FRENO EN EL AIRE ES PROGRESIVO, y hay una trampa aquí que me
+       comí de lleno. Mi primera versión bajaba la VELOCIDAD poco a poco y
+       dejaba el tope quieto: como el freno (0,058 m/s por subpaso) era más
+       flojo que la aceleración aérea (0,205), el tope no sujetaba nada y
+       el jugador llegaba a 40 m/s y saltaba 22 metros. El recorte tiene
+       que seguir siendo FIRME; lo que se mueve despacio es el TOPE. Sube
+       al instante y baja a ritmo limitado, así que pulsar Shift a media
+       caída frena en un cuarto de segundo en vez de pegar un frenazo.
+     · VALE IGUAL PARA EL JOYSTICK. En el móvil `target` ya es continuo
+       entre andar y correr, así que inclinarlo poco da también un salto
+       corto. Es la misma regla; tratarlos distinto sería peor.
+
+     Lo que NO cambia: quien no toca Shift tiene exactamente el juego de
+     antes, y las garantías del generador están calculadas a velocidad de
+     CARRERA, así que siguen valiendo tal cual. */
+  const FRENO_AIRE = 14;            // m/s² a los que puede BAJAR el tope aéreo
   const sp=Math.hypot(G.vx,G.vz);
-  const cap = G.grounded ? target : Math.max(target, AV.runSpeed)*1.05;
-  if (sp>cap){ G.vx*=cap/sp; G.vz*=cap/sp; }
+  if (G.grounded){
+    G.capAire = target;             // al despegar se parte del tope del suelo
+    if (sp>target){ const f=target/sp; G.vx*=f; G.vz*=f; }
+  } else {
+    const objetivo = target*1.05;
+    G.capAire = objetivo >= G.capAire ? objetivo
+                                      : Math.max(objetivo, G.capAire - FRENO_AIRE*h);
+    if (sp>G.capAire){ const f=G.capAire/sp; G.vx*=f; G.vz*=f; }
+  }
 
   // gravedad asimétrica, igual que fallingGravityMultiplier
   G.vy -= (G.vy>0 ? G_UP : G_DOWN) * h;
@@ -3909,6 +4030,10 @@ function loop(now){
     modoPintado = G.mode;
     document.body.classList.toggle("jugando", G.mode === "play");
     if (G.mode !== "play" && typeof soltarStick === "function"){ soltarStick(); Tacto.mira = null; }
+    /* La rueda es cosa de la partida: fuera de ella no tiene sentido, y
+       abierta taparía el menú de pausa (z-index 5 contra el auto de los
+       overlays) y se comería los clics del ratón. */
+    if (G.mode !== "play" && typeof Rueda !== "undefined") Rueda.cerrar();
   }
   let dt=(now-last)/1000; last=now;
   Perf.muestra(now, dt*1000);
@@ -4446,6 +4571,194 @@ function tintar(P, hex){
   });
 }
 function tintarPersona(hex){ tintar(PERSONA, hex); }
+
+/* ═══════════════════════════════════════════════════════════════
+   4g · LA RUEDA DE GESTOS
+
+   Las cifras del 1 al 9 siguen funcionando igual que siempre —son lo más
+   rápido que hay y quien se las sabe no quiere otra cosa—, pero hay que
+   sabérselas, y en el móvil no existen. La rueda es la puerta de entrada:
+   enseña los nueve gestos con su nombre y su número, así que además de
+   servir para elegir, ENSEÑA los atajos.
+
+   Un solo mecanismo para tres formas de usarla, que es lo que evita tener
+   tres implementaciones que se desincronizan:
+
+     · MANTENER LA T. Abres, mueves el ratón hacia el gesto, sueltas la T
+       y sale. Es lo más rápido: no hay que soltar el ratón ni acertarle a
+       nada, sólo empujar en una dirección. Si sueltas la T antes de 230 ms
+       sin haber empujado, se queda FIJA para elegir con calma.
+     · TOCAR LA T. Abre fija; eliges con el ratón y haces clic, o pulsas
+       una cifra, o Esc para cerrar.
+     · EL DEDO. El botón GESTOS abre la rueda y el MISMO dedo la apunta:
+       arrastras hacia el gesto y sueltas. Soltar sin salir del centro la
+       deja fija, y entonces se toca un sector.
+
+   Por qué la selección se calcula con un VECTOR y no con el cursor encima
+   de un sector: jugando hay bloqueo de puntero, o sea que no hay cursor
+   que poner encima de nada — sólo llegan deltas de movimiento. Acumular
+   esos deltas en un vector y mirar su ÁNGULO funciona igual con ratón
+   bloqueado, con ratón libre y con un dedo, y de paso es lo que hace que
+   "empujar en una dirección" baste sin tener que apuntar fino.
+
+   Mientras está abierta el muñeco no se mueve ni gira la cámara. No es
+   por gusto: un gesto exige estar parado y en el suelo (lo exige
+   iniciarGesto, y con razón), así que permitir moverse mientras eliges
+   sólo serviría para que al soltar no saliera nada.
+   ═══════════════════════════════════════════════════════════════ */
+
+const RUE = {
+  rExt: 96, rInt: 34,      // radios del anillo, en unidades del viewBox
+  hueco: 1.4,              // grados de aire entre sectores
+  zonaRaton: 34,           // px de ratón antes de que haya selección
+  alcance: 150,            // px a los que el vector toca el borde
+  toque: 230               // ms: soltar la T antes de esto la deja fija
+};
+
+const Rueda = {
+  abierta:false, fija:false, tactil:false, sel:-1,
+  ax:0, ay:0, t0:0, dedo:null,
+  el:null, svg:null, secs:[], etis:[], nums:[], cen:null, montada:false,
+
+  montar(){
+    if (this.montada) return;
+    this.el = $("rueda");
+    if (!this.el) return;
+    const NS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "-100 -100 200 200");
+    const paso = 360 / GESTOS.length;
+    const rad = a => a * Math.PI / 180;
+    const pt  = (r,a) => (r*Math.cos(rad(a))).toFixed(3) + "," + (r*Math.sin(rad(a))).toFixed(3);
+
+    /* Sectores primero y textos después: en SVG no hay z-index, manda el
+       orden del documento, y las etiquetas tienen que quedar por encima
+       del relleno del sector resaltado. */
+    GESTOS.forEach((g, i) => {
+      const c  = i*paso - 90;                       // 0 = arriba, como un reloj
+      const a0 = c - paso/2 + RUE.hueco, a1 = c + paso/2 - RUE.hueco;
+      const p  = document.createElementNS(NS, "path");
+      p.setAttribute("class", "sec");
+      p.setAttribute("d",
+        "M" + pt(RUE.rInt,a0) + "L" + pt(RUE.rExt,a0) +
+        "A" + RUE.rExt + "," + RUE.rExt + " 0 0 1 " + pt(RUE.rExt,a1) +
+        "L" + pt(RUE.rInt,a1) +
+        "A" + RUE.rInt + "," + RUE.rInt + " 0 0 0 " + pt(RUE.rInt,a0) + "Z");
+      svg.appendChild(p); this.secs.push(p);
+    });
+
+    const aro = document.createElementNS(NS, "circle");
+    aro.setAttribute("class","aro"); aro.setAttribute("r", RUE.rInt - 5);
+    svg.appendChild(aro);
+
+    GESTOS.forEach((g, i) => {
+      const c = i*paso - 90, r = (RUE.rInt + RUE.rExt) / 2;
+      const x = (r*Math.cos(rad(c))).toFixed(2), y = r*Math.sin(rad(c));
+      const t = document.createElementNS(NS, "text");
+      t.setAttribute("class","eti"); t.setAttribute("x",x); t.setAttribute("y",(y-3.4).toFixed(2));
+      t.textContent = g.nombre.toUpperCase();
+      const n = document.createElementNS(NS, "text");
+      n.setAttribute("class","num"); n.setAttribute("x",x); n.setAttribute("y",(y+6.2).toFixed(2));
+      n.textContent = String(i + 1);
+      svg.appendChild(t); svg.appendChild(n);
+      this.etis.push(t); this.nums.push(n);
+    });
+
+    const cen = document.createElementNS(NS, "text");
+    cen.setAttribute("class","cen"); cen.setAttribute("x","0"); cen.setAttribute("y","0");
+    svg.appendChild(cen); this.cen = cen;
+
+    this.el.appendChild(svg); this.svg = svg; this.montada = true;
+  },
+
+  puede(){ return !!(PERSONA.activo && G.mode === "play"); },
+
+  abrir(porTacto){
+    if (this.abierta || !this.puede()) return false;
+    this.montar();
+    if (!this.montada) return false;
+    this.abierta = true; this.fija = false; this.tactil = !!porTacto;
+    this.sel = -1; this.ax = 0; this.ay = 0; this.dedo = null;
+    this.t0 = performance.now();
+    this.el.hidden = false;
+    /* Un dedo apoyado en el stick al abrir dejaría al muñeco andando
+       mientras eliges, y entonces el gesto no saldría. */
+    if (typeof soltarStick === "function") soltarStick();
+    Tacto.mira = null;
+    this.pintar();
+    return true;
+  },
+
+  cerrar(){
+    if (!this.abierta) return;
+    this.abierta = false; this.fija = false; this.tactil = false;
+    this.sel = -1; this.dedo = null;
+    if (this.el) this.el.hidden = true;
+  },
+
+  /* Ratón: los deltas se ACUMULAN y el vector se recorta al alcance, para
+     que un manotazo no valga más que un empujón — lo que cuenta es hacia
+     dónde, no cuánto. */
+  mover(dx, dy){
+    if (!this.abierta) return;
+    this.ax += dx; this.ay += dy;
+    const n = Math.hypot(this.ax, this.ay);
+    if (n > RUE.alcance){ const f = RUE.alcance/n; this.ax *= f; this.ay *= f; }
+    this.calcular();
+  },
+
+  /* Dedo o ratón libre: posición absoluta contra el centro de la rueda. */
+  apuntarA(x, y){
+    if (!this.abierta || !this.svg) return;
+    const r = this.svg.getBoundingClientRect();
+    this.ax = x - (r.left + r.width/2);
+    this.ay = y - (r.top  + r.height/2);
+    this.calcular();
+  },
+
+  calcular(){
+    const n = Math.hypot(this.ax, this.ay);
+    /* La zona muerta del dedo es el agujero real de la rueda en píxeles;
+       la del ratón es fija, porque el vector del ratón no vive en la
+       pantalla y su escala no tiene por qué parecerse a la del dibujo. */
+    let muerta = RUE.zonaRaton;
+    if (this.tactil && this.svg){
+      const r = this.svg.getBoundingClientRect();
+      muerta = r.width * RUE.rInt / 200;
+    }
+    if (n < muerta) this.sel = -1;
+    else {
+      const paso = 360 / GESTOS.length;
+      let a = Math.atan2(this.ay, this.ax) * 180 / Math.PI + 90;   // 0 = arriba
+      a = ((a % 360) + 360) % 360;
+      this.sel = Math.round(a / paso) % GESTOS.length;
+    }
+    this.pintar();
+  },
+
+  pintar(){
+    for (let i = 0; i < this.secs.length; i++){
+      const on = (i === this.sel);
+      this.secs[i].classList.toggle("on", on);
+      this.etis[i].classList.toggle("on", on);
+      this.nums[i].classList.toggle("on", on);
+    }
+    this.cen.textContent = this.sel < 0 ? "· · ·" : GESTOS[this.sel].nombre.toUpperCase();
+  },
+
+  /* Dispara lo seleccionado y cierra. Si el gesto no sale —estabas en el
+     aire o andando— se avisa en el HUD en vez de no hacer nada: quedarse
+     callado se lee como "el botón está roto". */
+  elegir(){
+    const i = this.sel;
+    this.cerrar();
+    if (i < 0) return false;
+    const ok = iniciarGesto(GESTOS[i]);
+    if (!ok) avisoHUD("GESTOS: EN EL SUELO Y PARADO");
+    else if (G.lab && typeof pintarLab === "function") pintarLab();
+    return ok;
+  }
+};
 
 function gestoPorTecla(code){ return GESTOS.find(g => g.tecla === code) || null; }
 
@@ -5178,6 +5491,7 @@ function play(){
 }
 function pause(){
   if (G.mode!=="play") return;
+  Rueda.cerrar();
   G.mode="pause";
   $("pAlt").textContent=Math.round(Math.max(0,G.py))+" m";
   $("pBest").textContent=Math.round(G.best)+" m";
@@ -5305,7 +5619,14 @@ addEventListener("visibilitychange", ()=>{
 for (const ev of ["keydown","mousedown","wheel","touchstart"])
   addEventListener(ev, actividad, {passive:true});
 // el ratón solo cuenta si se mueve de verdad
-addEventListener("mousemove", e=>{ if (e.movementX||e.movementY) actividad(); }, {passive:true});
+addEventListener("mousemove", e=>{
+  if (e.movementX||e.movementY) actividad();
+  /* Sin bloqueo de puntero (rueda fija tras un toque, o arrastre) hay
+     cursor de verdad, así que se apunta con su POSICIÓN. El manejador de
+     mirada de más abajo sólo ve deltas y ahí no llega. */
+  if (Rueda.abierta && document.pointerLockElement !== W.renderer.domElement)
+    Rueda.apuntarA(e.clientX, e.clientY);
+}, {passive:true});
 addEventListener("keydown",e=>{
   /* Ctrl+Alt+B: laboratorio. No se usa Ctrl y "+" porque ese es el zoom del
      navegador y no se puede robar de forma fiable. */
@@ -5327,7 +5648,10 @@ addEventListener("keydown",e=>{
       case "KeyV": ajustarCaja(0,0,+P); return;
       case "KeyF": ajustarCaja(0,-P,0); return;
       case "KeyG": ajustarCaja(0,+P,0); return;
-      case "KeyT": restaurarCaja(); pintarLab(); return;
+      /* Era la T, y la T ahora abre la rueda de gestos EN TODAS PARTES,
+         laboratorio incluido — que es justo donde hace falta probarla.
+         Restaurar la caja se muda a la Y, que estaba libre. */
+      case "KeyY": restaurarCaja(); pintarLab(); return;
       case "KeyQ": {                       // rueda por los 8 de la paleta
         const i = Math.max(0, PALETA.indexOf(G.color));
         colorJugador(PALETA[(i + 1) % PALETA.length]);
@@ -5342,7 +5666,16 @@ addEventListener("keydown",e=>{
   if (PERSONA.activo && G.mode === "play" && !e.ctrlKey && !e.altKey && !e.metaKey
       && !G.keys[e.code]){
     const g = gestoPorTecla(e.code);
-    if (g){ iniciarGesto(g); if (G.lab) pintarLab(); }
+    /* Con la rueda abierta, una cifra es un atajo: cierra y dispara. Para
+       eso los números salen dibujados en cada sector. */
+    if (g){ Rueda.cerrar(); iniciarGesto(g); if (G.lab) pintarLab(); }
+  }
+  /* LA T. Mantenerla abre y soltarla dispara (lo resuelve el keyup); un
+     toque corto la deja fija y entonces la T vuelve a cerrarla. Va fuera
+     del bloque de arriba porque no es un gesto: es el menú de gestos. */
+  if (e.code === "KeyT" && !G.keys[e.code] && !e.ctrlKey && !e.altKey && !e.metaKey){
+    if (Rueda.abierta){ if (Rueda.fija) Rueda.cerrar(); }
+    else Rueda.abrir(false);
   }
   if (G.lab && e.code==="KeyP" && !G.keys["KeyP"] && PERSONA.raiz && !PERSONA.fallo){
     PERSONA.activo = !PERSONA.activo;
@@ -5360,12 +5693,29 @@ addEventListener("keydown",e=>{
     Snd.silenciar(); pintarAjustes(); avisoSonido();
   }
   if (G.mode==="play"){
-    if (e.code==="Space"){ G.buffer=BUFFER; doJump(); }
-    if (e.code==="KeyR"){ respawn(); }
-    if (e.code==="Escape") pause();
+    /* Con la rueda abierta, Espacio y Esc son suyos: saltar cancelaría el
+       gesto en el mismo fotograma en que sale, y Esc tiene que cerrar la
+       rueda antes de plantearse pausar la partida. */
+    if (e.code==="Escape" && Rueda.abierta){ Rueda.cerrar(); }
+    else if (e.code==="Space" && Rueda.abierta){ /* nada: eliges, no saltas */ }
+    else {
+      if (e.code==="Space"){ G.buffer=BUFFER; doJump(); }
+      if (e.code==="KeyR"){ Rueda.cerrar(); respawn(); }
+      if (e.code==="Escape") pause();
+    }
   } else if (G.mode==="pause" && e.code==="Escape") resume();
 });
-addEventListener("keyup",e=>{ G.keys[e.code]=false; });
+addEventListener("keyup",e=>{
+  /* Soltar la T: si la mantuviste (o llegaste a empujar) dispara lo
+     apuntado; si fue un toque seco sin empujar, la rueda se queda fija
+     para elegir con calma. */
+  if (e.code === "KeyT" && Rueda.abierta && !Rueda.fija && !Rueda.tactil){
+    const corto = performance.now() - Rueda.t0 < RUE.toque;
+    if (corto && Rueda.sel < 0) Rueda.fija = true;
+    else Rueda.elegir();
+  }
+  G.keys[e.code]=false;
+});
 addEventListener("blur",()=>{ G.keys=Object.create(null); });
 /* EL GIRO DE CÁMARA QUE TE TIRA DEL SALTO.
    Aquí no había ningún límite a lo que podía mover un solo evento:
@@ -5405,6 +5755,10 @@ document.addEventListener("mousemove",e=>{
   const mx = e.movementX || 0, my = e.movementY || 0;
   if (performance.now() - tBloqueo < GRACIA_LOCK) return;
   if (Math.abs(mx) > MIRA_MAX_PX || Math.abs(my) > MIRA_MAX_PX){ G.saltosRaton++; return; }
+  /* Con la rueda abierta el ratón apunta la rueda, no la cámara. Va
+     DESPUÉS del filtro de picos a propósito: un delta absurdo no puede
+     elegirte un gesto igual que no puede girarte la cámara. */
+  if (Rueda.abierta){ Rueda.mover(mx, my); return; }
   G.yaw   -= mx*0.0022;
   G.pitch  = clamp(G.pitch - my*0.0022, -1.25, 0.95);
 });
@@ -5415,6 +5769,13 @@ document.addEventListener("pointerlockchange",()=>{
   hadLock=false;
 });
 addEventListener("mousedown",e=>{
+  /* Con la rueda abierta el clic elige (y el derecho cancela). Antes que
+     nada, porque si no el clic se iría a pedir el bloqueo de puntero. */
+  if (Rueda.abierta){
+    e.preventDefault();
+    if (e.button === 0) Rueda.elegir(); else Rueda.cerrar();
+    return;
+  }
   if (G.mode!=="play"||e.button!==0) return;
   if (document.pointerLockElement!==W.renderer.domElement){ dragging=true; lock(); }
 });
@@ -5460,8 +5821,18 @@ function moverStick(t){
 
 addEventListener("touchstart", e => {
   if (G.mode !== "play") return;
+  /* Rueda abierta: el dedo elige sector y nada más. Ni stick ni cámara —
+     si no, al arrastrar hacia un gesto el muñeco echaría a andar y el
+     gesto no saldría. */
+  if (Rueda.abierta){
+    const t = e.changedTouches[0];
+    Rueda.dedo = t.identifier;
+    Rueda.apuntarA(t.clientX, t.clientY);
+    if (e.cancelable) e.preventDefault();
+    return;
+  }
   for (const t of e.changedTouches){
-    if (dentroDe($("btnSalto"),t) || dentroDe($("btnPausaT"),t)) continue;
+    if (dentroDe($("btnSalto"),t) || dentroDe($("btnPausaT"),t) || dentroDe($("btnGesto"),t)) continue;
     if (Tacto.stick === null && t.clientX < innerWidth*0.46){
       Tacto.stick = t.identifier;
       Tacto.base = { x:t.clientX, y:t.clientY };      // flotante: nace donde cae el pulgar
@@ -5475,6 +5846,12 @@ addEventListener("touchstart", e => {
 
 addEventListener("touchmove", e => {
   if (G.mode !== "play") return;
+  if (Rueda.abierta){
+    for (const t of e.changedTouches)
+      if (t.identifier === Rueda.dedo) Rueda.apuntarA(t.clientX, t.clientY);
+    if (e.cancelable) e.preventDefault();
+    return;
+  }
   for (const t of e.changedTouches){
     if (t.identifier === Tacto.stick) moverStick(t);
     else if (Tacto.mira && t.identifier === Tacto.mira.id){
@@ -5487,7 +5864,23 @@ addEventListener("touchmove", e => {
   if (e.cancelable) e.preventDefault();
 }, {passive:false});
 
+/* Al levantar el dedo de la rueda: si hay sector apuntado, sale el gesto;
+   si soltaste en el agujero del centro sin apenas tardar, era un toque
+   para abrirla y se queda FIJA (entonces se elige tocando un sector); y si
+   soltaste en el centro después de haber estado buscando, es que te
+   arrepentiste, así que se cierra sin hacer nada. */
+const RUEDA_TOQUE_DEDO = 420;     // ms por debajo de los cuales es "un toque"
 function finTacto(e){
+  if (Rueda.abierta){
+    for (const t of e.changedTouches){
+      if (t.identifier !== Rueda.dedo) continue;
+      Rueda.dedo = null;
+      if (Rueda.sel >= 0) Rueda.elegir();
+      else if (!Rueda.fija && performance.now() - Rueda.t0 < RUEDA_TOQUE_DEDO) Rueda.fija = true;
+      else Rueda.cerrar();
+    }
+    return;
+  }
   for (const t of e.changedTouches){
     if (t.identifier === Tacto.stick) soltarStick();
     else if (Tacto.mira && t.identifier === Tacto.mira.id) Tacto.mira = null;
@@ -5512,6 +5905,27 @@ function botonT(id, fn){
 }
 botonT("btnSalto",  () => { if (G.mode==="play"){ G.buffer=BUFFER; doJump(); } });
 botonT("btnPausaT", () => { if (G.mode==="play") pause(); });
+
+/* El botón de gestos no usa botonT: el dedo que lo pulsa tiene que SEGUIR
+   mandando después de pulsarlo —arrastras hacia el gesto y sueltas— y eso
+   lo recogen los manejadores globales de touchmove/touchend, que ya saben
+   qué hacer cuando la rueda está abierta. Aquí sólo se abre y se apunta el
+   identificador del dedo para que los de arriba lo sigan. */
+(() => {
+  const bg = $("btnGesto");
+  if (!bg) return;
+  bg.addEventListener("touchstart", e => {
+    e.preventDefault(); e.stopPropagation();
+    bg.classList.add("pulsado");
+    if (Rueda.abierta){ Rueda.cerrar(); return; }
+    if (Rueda.abrir(true)) Rueda.dedo = e.changedTouches[0].identifier;
+  }, {passive:false});
+  const fin = () => bg.classList.remove("pulsado");
+  bg.addEventListener("touchend", fin);
+  bg.addEventListener("touchcancel", fin);
+  /* Ratón o mando sobre la misma UI: abre fija y se elige con clic. */
+  bg.addEventListener("click", () => { Rueda.abierta ? Rueda.cerrar() : (Rueda.abrir(false) && (Rueda.fija = true)); });
+})();
 
 /* En vertical no se ve hacia arriba, que es el único sitio donde se mira
    en este juego. Se pide girar y se pausa mientras tanto. */
@@ -5593,6 +6007,9 @@ if (/\bdebug\b/.test(location.hash)){
                  abrirLab, salirLab, LAB, alternarAlambres,
                  PERSONA, TALLA, VEL_CLIP, actualizarPersona, estadoPersona,
                  GESTOS, iniciarGesto, pararGesto, tintarPersona, tintar, colorJugador, PALETA,
+                 Rueda, RUE,
+                 indexarTorre, box, JumpMath, AV, MARGEN, GENAJ,
+                 AIRE_PISAR,
                  MODELO, cargarModelo, nuevoPersonaje, animarPersonaje, prepararPersonaje,
                  PROPMOD, prepararProps, cargarProps, PROPS, PROP_DIM, PROP_PISA,
                  empaquetarRed, desempaquetarRed, DIST_ROBOT, DIST_ROBOT_SALE, ROBOT_EN_JUEGO,

@@ -432,7 +432,7 @@
     <h1>Torre Vertical</h1>
     <p class="tagline">Sube hasta la cima saltando de plataforma en plataforma. Un mal salto y vuelves abajo del todo: aquí no se guarda la partida.</p>
 
-    <button class="btn primary" id="btnIrDif"><strong>JUGAR</strong><small>Tú contra la torre.</small></button>
+    <button class="btn primary" id="btnIrDif"><strong>JUGAR EN SOLITARIO</strong><small>Tú contra la torre.</small></button>
     <button class="btn" id="btnIrAmigos"><strong>JUGAR CON AMIGOS</strong><small>La misma torre para todos, con un código de sala.</small></button>
 
     <div class="pliegues">
@@ -473,7 +473,7 @@
   <section id="mDif" hidden>
     <button class="volver" data-ir="portada">← Volver</button>
     <div class="kicker">ELIGE DIFICULTAD</div>
-    <div class="difs" id="difs"></div>
+    <div id="difsSolo"><div class="difs" id="difs"></div></div>
     <div id="diaWrap"></div>
     <!-- Enlace y no tarjeta: en esta pantalla TODO lo demás empieza una
          partida, y esto no. Con el mismo peso visual prometía lo que no
@@ -485,13 +485,23 @@
   <section id="mAmigos" hidden>
     <button class="volver" data-ir="portada">← Volver</button>
     <div class="kicker">SUBIR CON AMIGOS</div>
+    <!-- La dificultad de la sala. Se quedó fuera al partir el menú en dos
+         pasos y con ella desapareció la única forma de decidir en qué torre
+         subís: lo que se manda en el "hello" es G.dif, así que sin esto el
+         anfitrión abría siempre la sala con la dificultad que tuviera
+         puesta de antes, sin verla ni poder cambiarla.
+         Aquí la tarjeta SÓLO selecciona: en solitario empieza la partida,
+         pero en una sala la partida la empieza ENTRAR. -->
+    <div class="kicker">DIFICULTAD DE LA SALA</div>
+    <div id="difsSala"></div>
+    <div class="note">La fija <b>el primero que entra</b>. Si la sala ya existe, subes la torre que eligió quien llegó antes.</div>
     <div class="row2">
       <div><label for="pname">TU NOMBRE</label><input type="text" id="pname" maxlength="14" placeholder="escribe tu nombre" spellcheck="false" autocomplete="off"></div>
       <div><label for="room">CÓDIGO DE SALA</label><input type="text" id="room" maxlength="4" placeholder="ABCD" spellcheck="false" style="text-transform:uppercase;letter-spacing:.3em"></div>
     </div>
-    <button class="btn primary" id="btnJoin"><strong>ENTRAR A LA SALA</strong><small>El primero que entra decide la torre. Los demás la reciben.</small></button>
+    <button class="btn primary" id="btnJoin"><strong>ENTRAR A LA SALA</strong><small>Se abre la sala y empieza la partida.</small></button>
     <div class="note" id="netlog"></div>
-    <div class="note">Todos entran con <b>el mismo código</b>. El primero fija la semilla y el servidor se la pasa a los demás, así subís <b>exactamente la misma torre</b>.</div>
+    <div class="note">Comparte tu código con quien quieras: entrando con <b>el mismo</b> subís <b>exactamente la misma torre</b>.</div>
   </section>
 
   </div>
@@ -4163,7 +4173,13 @@ function pintarDifs(){
       /* Tocar la tarjeta ELIGE y EMPIEZA. El paso intermedio de "elegir y
          luego darle a subir" no decidía nada: la tarjeta ya enseña el lema,
          la altura y tu récord. */
-      b.addEventListener("click", ()=>{ elegirDif(id); Net.cerrar(); limpiarRemotos(); play(); });
+      b.addEventListener("click", ()=>{
+        elegirDif(id);
+        /* En solitario la tarjeta ES el botón de jugar. En una sala no
+           puede serlo: ahí falta escribir el código y la partida la abre
+           ENTRAR. */
+        if (Menu.paso !== "amigos"){ Net.cerrar(); limpiarRemotos(); play(); }
+      });
       cont.appendChild(b);
     }
   }
@@ -6036,6 +6052,11 @@ const Menu = {
     if (!PASOS[p]) p = "portada";
     this.paso = p;
     for (const k of Object.keys(PASOS)) $(PASOS[k]).hidden = (k !== p);
+    /* Las MISMAS tarjetas se mudan a la pantalla que toca en vez de tener
+       dos juegos: así el récord, el resaltado y pintarDifs siguen teniendo
+       una sola fuente, y no hay dos estados que se puedan desincronizar. */
+    const hueco = $(p === "amigos" ? "difsSala" : "difsSolo");
+    if ($("difs").parentNode !== hueco) hueco.appendChild($("difs"));
     /* Volver a la portada con el menú desplazado dejaba al jugador
        mirando el hueco donde estaba el pliegue que tenía abierto. */
     $("menu").scrollTop = 0;

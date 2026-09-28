@@ -63,6 +63,8 @@ const ok = (n, c, extra = "") => {
      cuenta.campos + " campos de texto visibles (antes: semilla y altura, de entrada)");
 
   const texto = await p.evaluate(() => document.getElementById("mPortada").innerText);
+  ok("el botón principal dice que es en solitario",
+     /SOLITARIO/i.test(texto), (texto.match(/JUGAR[^\n]*/) || [""])[0]);
   ok("la portada habla del juego, no de Unity",
      !/unity|previsualiza|generador|spatial/i.test(texto),
      texto.split("\n")[1] || "");
@@ -74,6 +76,31 @@ const ok = (n, c, extra = "") => {
   ok("y se puede volver", (await visible()) === "mPortada", await visible());
   await p.click("#btnIrAmigos");
   ok("JUGAR CON AMIGOS lleva a su pantalla", (await visible()) === "mAmigos", await visible());
+
+  /* Al partir el menú en dos, la dificultad se quedó en la rama de
+     solitario y la sala se quedó sin ella: el anfitrión abría siempre con
+     la que tuviera puesta de antes, sin verla. Lo que viaja en el "hello"
+     es G.dif, así que sin selector no había forma de decidir la torre. */
+  const enSala = await p.evaluate(() => {
+    const d = document.getElementById("difs");
+    return { dentro: !!document.getElementById("difsSala").contains(d),
+             visible: d.checkVisibility(),
+             tarjetas: d.querySelectorAll(".dbtn").length };
+  });
+  ok("la sala tiene su selector de dificultad",
+     enSala.dentro && enSala.visible && enSala.tarjetas === 3,
+     enSala.tarjetas + " tarjetas, visibles: " + enSala.visible);
+
+  /* Y ahí la tarjeta NO puede empezar la partida: falta el código de sala. */
+  await p.click("#difsSala .dbtn:nth-child(3)");
+  await p.waitForTimeout(300);
+  const trasTocar = await p.evaluate(() => ({ modo: window.__T.G.mode, dif: window.__T.G.dif,
+                                              paso: window.__T.Menu.paso }));
+  ok("en la sala la tarjeta elige pero no entra en juego",
+     trasTocar.modo === "menu" && trasTocar.paso === "amigos",
+     "modo " + trasTocar.modo + " · sigue en " + trasTocar.paso);
+  ok("y deja elegida la dificultad que viajará a la sala",
+     trasTocar.dif === "dificil", trasTocar.dif);
 
   console.log("\n── tocar una dificultad empieza la partida ──────────────");
   await p.evaluate(() => window.__T.Menu.ir("dif"));

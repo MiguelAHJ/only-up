@@ -1,3 +1,54 @@
+# Cambios — 28 de septiembre de 2026 (trigésimo tercer lote): la sala recupera su dificultad
+
+Lo cazó Miguel probando el menú nuevo: *«si le doy a jugar con amigos, no se
+ve la forma de ajustar la dificultad de la sala»*. Es un fallo que introdujo
+el lote 32, y de los feos: **no se rompió nada, se perdió una capacidad**.
+
+Al partir el menú en dos pasos, la dificultad se quedó en la rama de
+solitario. Pero lo que viaja en el `hello` al abrir sala es `G.dif`, así que
+el anfitrión abría siempre con la dificultad que tuviera puesta de antes,
+**sin verla y sin poder cambiarla**. Antes, con todo en una página, la
+elegías y luego entrabas; era obvio.
+
+## Lo que cambia
+
+- **La pantalla de sala recupera el selector**, con su propio encabezado
+  (DIFICULTAD DE LA SALA) y una línea que dice lo que hace: la fija el
+  primero que entra, y si la sala ya existe subes la que eligió quien llegó
+  antes.
+- **Ahí la tarjeta sólo elige, no lanza la partida.** En solitario la
+  tarjeta *es* el botón de jugar; en una sala no puede serlo, porque falta
+  escribir el código y la partida la abre ENTRAR.
+- **El botón principal dice ahora JUGAR EN SOLITARIO.** «JUGAR» a secas se
+  leía como «jugar de cualquier manera», y esa era la otra mitad del
+  malentendido.
+- Se quita la repetición: «el primero que entra decide la torre» salía tres
+  veces seguidas en la misma pantalla.
+
+## Cómo, y por qué así
+
+Las tarjetas son **las mismas**, no una copia: `Menu.ir` las muda al hueco
+de la pantalla que toca (`#difsSolo` o `#difsSala`). Con dos juegos de
+tarjetas habría dos estados —el resaltado, el récord— que se pueden
+desincronizar, y `pintarDifs` tendría que saber de ambos. Así sigue habiendo
+una sola fuente.
+
+## La prueba
+
+Tres comprobaciones nuevas en `test/menu.js`, y las tres mutadas: quitarle
+el hueco a la sala (las tarjetas dejan de verse), dejar que la tarjeta de la
+sala lance la partida (`modo play` cuando debería seguir en `menu`), y
+devolver el botón a «JUGAR» a secas.
+
+Regresión completa en verde, más `nombre.js`.
+
+## Archivos tocados
+
+- `index.html` — la pantalla de sala y el texto del botón principal
+- `test/menu.js` — tres comprobaciones más
+
+---
+
 # Cambios — 28 de septiembre de 2026 (trigésimo segundo lote): el menú deja de ser un panel de control
 
 Miguel: *«me ha pasado mucho que apenas entran me preguntan "¿qué hago?"»*.

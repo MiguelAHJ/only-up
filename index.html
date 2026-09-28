@@ -226,6 +226,32 @@
   .screen[hidden]{display:none!important}
   .panel{width:min(600px,100%);display:flex;flex-direction:column;gap:20px;margin-block:auto}
 
+  /* ── EL MENÚ EN DOS PASOS ─────────────────────────────────────────
+     Cada paso es una <section> del mismo panel; sólo una está visible.
+     Se hace así y no con pantallas separadas para que TODOS los campos
+     sigan existiendo en el DOM: elegirDif, alternarDia y regenerate leen
+     #seed y #height directamente, así que esconderlos no puede
+     significar quitarlos. */
+  #menu .panel > section{display:flex;flex-direction:column;gap:20px}
+  #menu .panel > section[hidden]{display:none}
+  .volver{background:none;border:0;padding:2px 0;align-self:flex-start;
+    color:var(--ash);font-family:var(--mono);font-size:12px;letter-spacing:.12em}
+  .volver:hover{color:var(--bone)}
+
+  /* Los pliegues del pie: <details> nativo, que ya trae el teclado y el
+     lector de pantalla resueltos. */
+  .pliegues{display:flex;flex-direction:column;gap:8px}
+  .pliegues details{border:1px solid var(--edge);background:rgba(232,228,220,.02)}
+  .pliegues summary{padding:13px 15px;cursor:pointer;list-style:none;
+    font-family:var(--mono);font-size:12px;letter-spacing:.14em;color:var(--ash)}
+  .pliegues summary::-webkit-details-marker{display:none}
+  .pliegues summary::after{content:"+";float:right;color:var(--ash)}
+  .pliegues details[open] summary{color:var(--bone);border-bottom:1px solid var(--edge)}
+  .pliegues details[open] summary::after{content:"–"}
+  .pliegues .cuerpo{padding:15px;display:flex;flex-direction:column;gap:14px}
+  /* El panel del autor va apagado a propósito: está, pero no llama. */
+  #dAvanzado summary{color:rgba(110,117,131,.7)}
+
   .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.32em;color:var(--ember)}
   h1{font-family:var(--display);font-size:clamp(40px,9vw,70px);line-height:.88;margin:0;
      letter-spacing:-.03em;text-wrap:balance}
@@ -251,6 +277,10 @@
   .btn.primary:hover{background:rgba(255,107,44,.2)}
 
   .keys{display:flex;flex-wrap:wrap;gap:7px}
+  /* Los mandos táctiles se explican con su nombre, no con teclas. */
+  .mando{display:flex;gap:10px;align-items:baseline;font-size:13px;line-height:1.5}
+  .mando b{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--ember);
+    min-width:92px;flex:none}
   kbd{font-family:var(--mono);font-size:10.5px;color:var(--ash);border:1px solid var(--edge);
       padding:5px 8px;background:rgba(232,228,220,.03)}
   kbd b{color:var(--bone);font-weight:600}
@@ -315,6 +345,15 @@
   @media (max-height:560px){
     .overlay{padding:12px}
     .overlay .ovbox{gap:9px}
+    /* Un móvil en horizontal tiene ~360 px de alto. Con el título a tamaño
+       de escritorio se comía media pantalla y había que desplazarse para
+       llegar a JUGAR, que es justo lo que veníamos a arreglar. */
+    #menu h1{font-size:clamp(26px,9vh,40px);line-height:1.05}
+    #menu .tagline{font-size:13px;line-height:1.45}
+    #menu .panel{gap:12px}
+    #menu .panel > section{gap:12px}
+    #menu .btn{padding:11px 14px}
+    .pliegues summary{padding:10px 14px}
   }
   .overlay[hidden]{display:none!important}
   #ajustes,#ajustesPausa{display:flex;flex-direction:column;gap:10px}
@@ -381,55 +420,80 @@
 
 <div class="screen" id="menu">
   <div class="panel">
-    <div class="kicker">PREVISUALIZACIÓN DEL NIVEL · MISMO GENERADOR QUE UNITY</div>
-    <h1>Torre Vertical</h1>
-    <p class="tagline">La misma torre que construirá el script en Spatial, con las <em>mismas constantes de física</em>. Sirve para juzgar el diseño y el tacto de los saltos antes de instalar Unity.</p>
 
-    <div class="rule"></div>
-    <div class="kicker">DIFICULTAD</div>
+  <!-- ══ PASO 1 · LA PORTADA ═══════════════════════════════════════
+       Lo que ve alguien que entra por primera vez. Cuatro cosas, no
+       veintiocho: qué es el juego, jugar, jugar con amigos, y tres
+       pliegues cerrados para lo demás. Antes lo primero que se leía era
+       "PREVISUALIZACIÓN DEL NIVEL · MISMO GENERADOR QUE UNITY", que le
+       decía al jugador que esto no era un juego; de ahí el "¿qué hago?"
+       con el que llegaba todo el mundo. -->
+  <section id="mPortada">
+    <h1>Torre Vertical</h1>
+    <p class="tagline">Sube hasta la cima saltando de plataforma en plataforma. Un mal salto y vuelves abajo del todo: aquí no se guarda la partida.</p>
+
+    <button class="btn primary" id="btnIrDif"><strong>JUGAR</strong><small>Tú contra la torre.</small></button>
+    <button class="btn" id="btnIrAmigos"><strong>JUGAR CON AMIGOS</strong><small>La misma torre para todos, con un código de sala.</small></button>
+
+    <div class="pliegues">
+      <details id="dControles">
+        <summary>Controles</summary>
+        <div class="cuerpo" id="controles"></div>
+      </details>
+      <details id="dAjustes">
+        <summary>Ajustes</summary>
+        <div class="cuerpo"><div id="ajustes"></div></div>
+      </details>
+      <!-- El panel del autor. Sigue estando a un clic, pero ya no es lo
+           primero que ve quien viene a jugar. -->
+      <details id="dAvanzado">
+        <summary>Torre a medida</summary>
+        <div class="cuerpo">
+          <div class="row2">
+            <div><label for="seed">SEMILLA</label><input type="text" id="seed" value="20260918" spellcheck="false"></div>
+            <div><label for="height">ALTURA (M)</label><input type="number" id="height" value="800" min="50" max="3000" step="50"></div>
+          </div>
+          <div id="srvWrap" hidden>
+            <label for="srv">SERVIDOR DE LA SALA</label>
+            <input type="text" id="srv" placeholder="wss://tu-app.deno.dev/ws" spellcheck="false">
+          </div>
+          <button class="btn" id="btnPlay"><strong>SUBIR CON ESTOS AJUSTES</strong><small>Se bloquea el ratón. ESC para salir.</small></button>
+          <div class="kicker">ALCANCE DEL AVATAR</div>
+          <div class="specs" id="specs"></div>
+          <div class="note" id="verif"></div>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <!-- ══ PASO 2 · LA DIFICULTAD ════════════════════════════════════
+       La única decisión que toma de verdad un jugador. Tocar una tarjeta
+       EMPIEZA la partida: el paso de "elegir y luego darle a subir" no
+       aportaba nada y era un clic más entre el jugador y el juego. -->
+  <section id="mDif" hidden>
+    <button class="volver" data-ir="portada">← Volver</button>
+    <div class="kicker">ELIGE DIFICULTAD</div>
     <div class="difs" id="difs"></div>
     <div id="diaWrap"></div>
+    <!-- Enlace y no tarjeta: en esta pantalla TODO lo demás empieza una
+         partida, y esto no. Con el mismo peso visual prometía lo que no
+         hace. -->
+    <button class="volver" id="btnRegen">↻ Otra torre con este mismo nivel</button>
+  </section>
 
-    <div class="rule"></div>
-    <div class="kicker">ALCANCE DEL AVATAR</div>
-    <div class="specs" id="specs"></div>
-    <div class="note" id="verif"></div>
-
-    <div class="rule"></div>
-    <div class="row2">
-      <div><label for="seed">SEMILLA</label><input type="text" id="seed" value="20260918" spellcheck="false"></div>
-      <div><label for="height">ALTURA (M)</label><input type="number" id="height" value="800" min="50" max="3000" step="50"></div>
-    </div>
-
-    <button class="btn primary" id="btnPlay"><strong>SUBIR EN SOLITARIO</strong><small>Se bloquea el ratón. ESC para salir.</small></button>
-    <button class="btn" id="btnRegen"><strong>OTRA TORRE</strong><small>Genera con una semilla nueva.</small></button>
-
-    <div class="rule"></div>
+  <!-- ══ PASO 2b · CON AMIGOS ══════════════════════════════════════ -->
+  <section id="mAmigos" hidden>
+    <button class="volver" data-ir="portada">← Volver</button>
     <div class="kicker">SUBIR CON AMIGOS</div>
     <div class="row2">
       <div><label for="pname">TU NOMBRE</label><input type="text" id="pname" maxlength="14" placeholder="escribe tu nombre" spellcheck="false" autocomplete="off"></div>
       <div><label for="room">CÓDIGO DE SALA</label><input type="text" id="room" maxlength="4" placeholder="ABCD" spellcheck="false" style="text-transform:uppercase;letter-spacing:.3em"></div>
     </div>
-    <div id="srvWrap" hidden>
-      <label for="srv">SERVIDOR DE LA SALA</label>
-      <input type="text" id="srv" placeholder="wss://tu-app.deno.dev/ws" spellcheck="false">
-    </div>
-    <button class="btn" id="btnJoin"><strong>ENTRAR A LA SALA</strong><small>El primero que entra decide la torre. Los demás la reciben.</small></button>
+    <button class="btn primary" id="btnJoin"><strong>ENTRAR A LA SALA</strong><small>El primero que entra decide la torre. Los demás la reciben.</small></button>
     <div class="note" id="netlog"></div>
     <div class="note">Todos entran con <b>el mismo código</b>. El primero fija la semilla y el servidor se la pasa a los demás, así subís <b>exactamente la misma torre</b>.</div>
+  </section>
 
-    <div class="rule"></div>
-    <div class="kicker">AJUSTES</div>
-    <div id="ajustes"></div>
-
-    <div class="rule"></div>
-    <div class="keys">
-      <kbd><b>W A S D</b> MOVER</kbd><kbd><b>RATÓN</b> CÁMARA</kbd>
-      <kbd><b>ESPACIO</b> SALTAR ×2</kbd><kbd><b>SHIFT</b> ANDAR · SALTO CORTO</kbd>
-      <kbd><b>T</b> RUEDA DE GESTOS</kbd><kbd><b>1…9</b> GESTO DIRECTO</kbd>
-      <kbd><b>R</b> REINICIAR</kbd><kbd><b>ESC</b> PAUSA</kbd>
-    </div>
-    <div class="note warn">Corres por defecto: las distancias están calculadas a <b>velocidad de carrera</b>. Con <b>Shift</b> andas <em>y saltas corto</em>: la mitad de lejos (3,2 m frente a 6,5). Si lo sueltas en el aire, recuperas el salto largo.</div>
   </div>
 </div>
 
@@ -4096,7 +4160,10 @@ function pintarDifs(){
       b.children[0].textContent = d.nombre;
       b.children[1].textContent = d.lema;
       b.children[2].textContent = d.altura + " M POR DEFECTO";
-      b.addEventListener("click", ()=>elegirDif(id));
+      /* Tocar la tarjeta ELIGE y EMPIEZA. El paso intermedio de "elegir y
+         luego darle a subir" no decidía nada: la tarjeta ya enseña el lema,
+         la altura y tu récord. */
+      b.addEventListener("click", ()=>{ elegirDif(id); Net.cerrar(); limpiarRemotos(); play(); });
       cont.appendChild(b);
     }
   }
@@ -4123,7 +4190,10 @@ function pintarDia(){
     ' · SEMILLA ' + semillaDelDia() + '</span>' +
     '<span class="alt marca">HOY: ' + fmtMarca(m) + '</span>' +
     '</button>';
-  $("btnDia").addEventListener("click", ()=>alternarDia());
+  $("btnDia").addEventListener("click", ()=>{
+    if (!G.dia) alternarDia();          // nunca la apaga: desde aquí sólo se entra
+    Net.cerrar(); limpiarRemotos(); play();
+  });
 }
 
 function alternarDia(){
@@ -5588,6 +5658,10 @@ function toMenu(){
   G.mode="menu"; $("hud").classList.remove("on");
   $("pause").hidden=true; $("win").hidden=true; $("menu").hidden=false;
   pintarDifs();                       // los récords, recién actualizados
+  /* Al salir de una partida se vuelve a la DIFICULTAD, no a la portada:
+     quien acaba de jugar ya sabe qué es esto y lo que quiere es volver a
+     entrar. La portada es para quien llega por primera vez. */
+  Menu.ir("dif");
   if (document.exitPointerLock) document.exitPointerLock();
 }
 function lock(){
@@ -5942,6 +6016,60 @@ if (window.visualViewport)
   visualViewport.addEventListener("resize", () => dispatchEvent(new Event("resize")));
 revisarOrientacion();
 
+/* ═══════════════════════════════════════════════════════════════
+   EL MENÚ EN DOS PASOS
+
+   Miguel lo resumió así: "apenas entran me preguntan «¿qué hago?»". El
+   panel tenía veintiocho elementos en una columna, todos con el mismo
+   peso, y lo primero que se leía era que esto era una previsualización
+   para Unity. Ahora hay una portada con cuatro cosas y un segundo paso
+   con la única decisión que toma de verdad un jugador.
+
+   Los tres pasos son secciones del MISMO panel, no pantallas aparte: así
+   #seed, #height, #pname y compañía siguen existiendo siempre en el DOM,
+   que es de donde los leen elegirDif, alternarDia y regenerate.
+   ═══════════════════════════════════════════════════════════════ */
+const PASOS = { portada:"mPortada", dif:"mDif", amigos:"mAmigos" };
+const Menu = {
+  paso: "portada",
+  ir(p){
+    if (!PASOS[p]) p = "portada";
+    this.paso = p;
+    for (const k of Object.keys(PASOS)) $(PASOS[k]).hidden = (k !== p);
+    /* Volver a la portada con el menú desplazado dejaba al jugador
+       mirando el hueco donde estaba el pliegue que tenía abierto. */
+    $("menu").scrollTop = 0;
+  }
+};
+for (const b of document.querySelectorAll("[data-ir]"))
+  b.addEventListener("click", () => Menu.ir(b.dataset.ir));
+$("btnIrDif").addEventListener("click", () => Menu.ir("dif"));
+$("btnIrAmigos").addEventListener("click", () => { Menu.ir("amigos"); $("pname").focus(); });
+
+/* Los controles, contados como toca según el aparato. Antes la lista de
+   teclas salía igual en un móvil, que no tiene ninguna. */
+function pintarControles(){
+  const c = $("controles");
+  if (ES_TACTIL){
+    c.innerHTML =
+      '<div class="mando"><b>PULGAR IZQ.</b><span>Arrastra en la mitad izquierda de la pantalla para moverte. Poco recorrido: andas. Todo el recorrido: corres.</span></div>' +
+      '<div class="mando"><b>PULGAR DER.</b><span>Arrastra en la mitad derecha para girar la cámara.</span></div>' +
+      '<div class="mando"><b>SALTAR</b><span>El botón redondo de abajo a la derecha. Tócalo dos veces para el salto doble.</span></div>' +
+      '<div class="mando"><b>GESTOS</b><span>El botón de encima: mantén y arrastra hacia el gesto que quieras, y suelta.</span></div>' +
+      '<div class="mando"><b>❚❚</b><span>Arriba a la derecha, pausa.</span></div>' +
+      '<div class="note">Se juega en horizontal: en vertical no se ve hacia arriba, que es justo donde hay que mirar.</div>';
+  } else {
+    c.innerHTML =
+      '<div class="keys">' +
+      '<kbd><b>W A S D</b> MOVER</kbd><kbd><b>RATÓN</b> CÁMARA</kbd>' +
+      '<kbd><b>ESPACIO</b> SALTAR ×2</kbd><kbd><b>SHIFT</b> ANDAR · SALTO CORTO</kbd>' +
+      '<kbd><b>T</b> RUEDA DE GESTOS</kbd><kbd><b>1…9</b> GESTO DIRECTO</kbd>' +
+      '<kbd><b>R</b> REINICIAR</kbd><kbd><b>ESC</b> PAUSA</kbd></div>' +
+      '<div class="note warn">Corres por defecto: las distancias están calculadas a <b>velocidad de carrera</b>. Con <b>Shift</b> andas <em>y saltas corto</em>: la mitad de lejos (3,2 m frente a 6,5). Si lo sueltas en el aire, recuperas el salto largo.</div>';
+  }
+}
+pintarControles();
+
 $("btnPlay").addEventListener("click",()=>{ Net.cerrar(); limpiarRemotos(); play(); });
 $("btnJoin").addEventListener("click",()=>{
   const c=leerSala();
@@ -6008,7 +6136,7 @@ if (/\bdebug\b/.test(location.hash)){
                  PERSONA, TALLA, VEL_CLIP, actualizarPersona, estadoPersona,
                  GESTOS, iniciarGesto, pararGesto, tintarPersona, tintar, colorJugador, PALETA,
                  Rueda, RUE,
-                 indexarTorre, box, JumpMath, AV, MARGEN, GENAJ,
+                 indexarTorre, box, JumpMath, AV, MARGEN, GENAJ, Menu, pintarControles, toMenu, elegirDif, ES_TACTIL,
                  AIRE_PISAR,
                  MODELO, cargarModelo, nuevoPersonaje, animarPersonaje, prepararPersonaje,
                  PROPMOD, prepararProps, cargarProps, PROPS, PROP_DIM, PROP_PISA,

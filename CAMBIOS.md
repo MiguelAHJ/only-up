@@ -1,3 +1,121 @@
+# Cambios — 28 de septiembre de 2026 (trigésimo segundo lote): el menú deja de ser un panel de control
+
+Miguel: *«me ha pasado mucho que apenas entran me preguntan "¿qué hago?"»*.
+
+## El culpable principal
+
+Lo primero que leía un jugador nuevo era esto:
+
+> PREVISUALIZACIÓN DEL NIVEL · MISMO GENERADOR QUE UNITY
+> *«Sirve para juzgar el diseño y el tacto de los saltos antes de instalar Unity.»*
+
+Eso no es un menú de juego: es la portada de una herramienta de desarrollo.
+A quien entraba a jugar se le decía, en la primera línea, que esto era para
+evaluar un script. La pregunta no era rara; era la respuesta correcta a lo
+que ponía.
+
+Debajo, **veintiocho elementos en una sola columna**, todos con el mismo
+peso visual, y doce decisiones antes de poder jugar: dificultad, torre del
+día, semilla, altura, solo o regenerar, nombre, sala, servidor, entrar,
+calidad, volumen, sonido. El botón de jugar estaba a media página, después
+de la semilla y de la tabla de alcance del avatar. Los controles, al final
+del todo: aprendías a jugar *después* de decidir jugar. Y en móvil se
+mostraban `W A S D` y `ESPACIO`, donde no hay teclado.
+
+## Lo que hay ahora
+
+El menú se parte en dos pasos, y el panel del autor se separa del menú del
+jugador. **No se ha quitado nada: se ha movido.**
+
+**La portada** — cinco bloques a la vista, cero campos de texto:
+
+- el título
+- una frase que dice qué es el juego: *«Sube hasta la cima saltando de
+  plataforma en plataforma. Un mal salto y vuelves abajo del todo: aquí no
+  se guarda la partida.»*
+- **JUGAR**
+- **JUGAR CON AMIGOS**
+- tres pliegues cerrados: *Controles*, *Ajustes*, *Torre a medida*
+
+**La dificultad** — la única decisión que toma de verdad un jugador: las
+tres tarjetas con su lema, su altura y tu récord, más la torre del día.
+**Tocar una tarjeta empieza la partida.** El paso de «elegir y luego darle a
+subir» no decidía nada y era un clic más entre el jugador y el juego.
+
+**Con amigos** — nombre, código y entrar, solos en su pantalla.
+
+**Torre a medida** — semilla, altura, alcance del avatar, la nota de
+verificación, el servidor de sala y un «subir con estos ajustes». Sigue a un
+clic, ya no es lo primero que se ve.
+
+Dos detalles que sólo se vieron mirando las capturas:
+
+- **OTRA TORRE era una tarjeta** del mismo tamaño que las dificultades,
+  siendo lo único de esa pantalla que *no* empieza una partida. Ahora es un
+  enlace discreto.
+- **En móvil girado el título se comía media pantalla.** Bajo 560 px de alto
+  se aprieta todo: el título pasa del 16% de la pantalla al 9%.
+
+Y los controles se cuentan según el aparato: en táctil hablan de pulgares,
+del botón de saltar y del de gestos; con teclado, de teclas.
+
+## Cómo se implementó, y por qué así
+
+Los tres pasos son `<section>` del **mismo panel**, no pantallas aparte. Es
+la decisión que más riesgo quitó: `elegirDif`, `alternarDia` y `regenerate`
+leen `#seed` y `#height` directamente del DOM, así que **plegar no podía
+significar quitar**. Los doce campos y botones de antes siguen todos ahí.
+
+Los pliegues son `<details>` nativo: trae resueltos el teclado y el lector
+de pantalla sin escribir nada.
+
+Al salir de una partida se vuelve a **la dificultad**, no a la portada:
+quien acaba de jugar ya sabe qué es esto y lo que quiere es volver a entrar.
+
+## La prueba
+
+`test/menu.js`, 16 comprobaciones. Cuenta lo que de verdad se ve —con
+`checkVisibility`, no con la caja del elemento, porque lo que hay dentro de
+un `<details>` cerrado a veces sigue teniendo caja— y comprueba que la
+portada no mencione Unity, que se llegue a jugar en dos toques, que tocar la
+dificultad entre en juego, y que los campos del autor **sigan mandando en la
+torre aunque estén plegados**.
+
+Mutaciones que la ponen roja:
+
+| mutación | qué salta |
+|---|---|
+| vuelve la frase de Unity a la portada | «la portada habla del juego, no de Unity» |
+| el pliegue del autor nace abierto | 2 campos de texto a la vista |
+| tocar la dificultad vuelve a sólo seleccionar | `menu → menu` en vez de `menu → play` |
+| los controles vuelven a ser teclas en el móvil | «W A S D MOVER» donde no hay teclado |
+| se quita el apretado del horizontal | el título pasa del 9% al 16% de la pantalla |
+
+**Una afirmación hubo que reescribirla.** La primera versión comprobaba que
+el botón JUGAR cupiera en un móvil girado… y ya cabía **antes** de apretar
+nada, así que pasaba igual con el apretado quitado: no medía lo que yo
+decía. Lo que de verdad se comía la pantalla era el título, y eso es lo que
+mide ahora.
+
+Regresión completa: `generador`, `props`, `papeleria`, `alcantarillas`,
+`camara`, `personaje`, `gestos`, `lote23`, `instancias`, `shift`, `cache`,
+`rueda`, `saltos`, `menu` — 0 fallos.
+
+`nombre.js` y `prueba1-4.js` tocan `#pname`, `#room` y `#btnJoin`, que ahora
+viven detrás de JUGAR CON AMIGOS: se les añadió la línea que lleva la página
+a esa pantalla antes de tocarlos. `nombre.js` verificado pasando; las
+`prueba*.js` necesitan el relé de dos clientes y quedan sin ejecutar aquí.
+
+## Archivos tocados
+
+- `index.html` — el menú entero, el CSS de los pliegues y del horizontal
+- `test/menu.js` — nueva
+- `test/foto-menu.js` — capturas del menú, nueva
+- `test/nombre.js`, `prueba.js`, `prueba2.js`, `prueba3.js`, `prueba4.js` —
+  una línea de navegación
+
+---
+
 # Cambios — 25 de septiembre de 2026 (trigésimo primer lote): los escalones de la cima bajan 80 cm
 
 Lo pidió Miguel después de quedarse atascado en la torre 20260918: «que ese
